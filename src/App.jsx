@@ -7,7 +7,7 @@ import {
   Store as StoreIcon, Truck, DollarSign, Users, 
   Plus, X, CheckCircle, TrendingUp, Package, Clock, AlertCircle,
   Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck, Sparkles,
-  Menu, Bell, Camera, Box, Tag
+  Menu, Bell, Camera, Box, Tag, Trash2, XCircle
 } from 'lucide-react';
 
 // --- إعدادات فايربيس ---
@@ -88,13 +88,15 @@ const StatusBadge = ({ status }) => {
     pending: 'bg-yellow-100 text-yellow-800',
     ready: 'bg-blue-100 text-blue-800',
     out_for_delivery: 'bg-purple-100 text-purple-800',
-    completed: 'bg-green-100 text-green-800'
+    completed: 'bg-green-100 text-green-800',
+    cancelled: 'bg-red-100 text-red-800'
   };
   const labels = {
     pending: 'جاري التحضير', 
     ready: 'تم التجهيز',
     out_for_delivery: 'في الطريق', 
-    completed: 'مكتمل'
+    completed: 'مكتمل',
+    cancelled: 'ملغي'
   };
   return (
     <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>
@@ -127,7 +129,7 @@ const compressImage = (file, maxWidth = 600) => {
         canvas.height = img.height * scaleSize;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6)); // ضغط عالي لتوفير المساحة
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
       img.src = event.target.result;
     };
@@ -189,7 +191,6 @@ export default function App() {
         const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         fetchedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         
-        // نظام الإشعارات للطلبات الجديدة
         if (prevOrderCount.current !== 0 && fetchedOrders.length > prevOrderCount.current) {
            showNotification("🔔 تم إضافة طلب جديد للنظام!");
         }
@@ -260,7 +261,7 @@ export default function App() {
     { id: 'Delivery', icon: Truck, label: 'التوصيل والشحن' },
     { id: 'Sales', icon: TrendingUp, label: 'سجل المبيعات' },
     { id: 'Finance', icon: DollarSign, label: 'المالية والحسابات' },
-    { id: 'Store', icon: StoreIcon, label: 'المخزون والمستودع' }, // تم النقل للنهاية
+    { id: 'Store', icon: StoreIcon, label: 'المخزون والمستودع' },
     { id: 'Admin', icon: Users, label: 'إدارة النظام' },
   ];
 
@@ -318,6 +319,7 @@ export default function App() {
       if (!matchesSearch) return false;
       if (filter === 'active') return ['pending', 'ready', 'out_for_delivery'].includes(o.status);
       if (filter === 'completed') return o.status === 'completed';
+      if (filter === 'cancelled') return o.status === 'cancelled';
       return true;
     });
 
@@ -340,6 +342,13 @@ export default function App() {
         notes: order.notes || '', images: order.images || (order.imageUrl ? [order.imageUrl] : [])
       });
       setModalOpen(true);
+    };
+
+    const handleCancelOrder = async (id) => {
+      if(window.confirm('هل أنت متأكد من رغبتك في إلغاء هذا الطلب نهائياً؟')) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id), { status: 'cancelled', updatedAt: new Date().toISOString() });
+        showNotification('تم إلغاء الطلب بنجاح.');
+      }
     };
 
     const handleSubmit = async (e) => {
@@ -375,6 +384,7 @@ export default function App() {
         <div className="flex flex-wrap gap-2 mb-4">
           <button onClick={() => setFilter('active')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === 'active' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الطلبات النشطة</button>
           <button onClick={() => setFilter('completed')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === 'completed' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>سجل المنجز</button>
+          <button onClick={() => setFilter('cancelled')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === 'cancelled' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-white text-gray-600 border'}`}>الطلبات الملغاة</button>
           <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === 'all' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الكل</button>
         </div>
         
@@ -400,14 +410,19 @@ export default function App() {
               </td>
               <td className="p-4 font-semibold text-gray-700">${Number(o.price).toFixed(2)}</td>
               <td className="p-4"><StatusBadge status={o.status} /></td>
-              <td className="p-4">
-                <button onClick={() => handleEdit(o)} className="text-blue-600 hover:text-blue-800 p-2 bg-blue-50 rounded-lg transition-colors">
+              <td className="p-4 flex gap-2">
+                <button onClick={() => handleEdit(o)} className="text-blue-600 hover:text-blue-800 p-2 bg-blue-50 rounded-lg transition-colors" title="تعديل">
                   <Edit size={18} />
                 </button>
+                {o.status !== 'cancelled' && (
+                  <button onClick={() => handleCancelOrder(o.id)} className="text-red-600 hover:text-red-800 p-2 bg-red-50 rounded-lg transition-colors" title="إلغاء الطلب">
+                    <Trash2 size={18} />
+                  </button>
+                )}
               </td>
             </tr>
           ))}
-          {filteredOrders.length === 0 && <tr><td colSpan="7" className="p-6 text-center text-gray-400">لا توجد طلبات مطابقة للبحث.</td></tr>}
+          {filteredOrders.length === 0 && <tr><td colSpan="7" className="p-6 text-center text-gray-400">لا توجد طلبات مطابقة.</td></tr>}
         </Table>
 
         <Modal isOpen={isModalOpen} onClose={() => setModalOpen(false)} title={editingId ? "تعديل الطلب" : "إنشاء طلب جديد"} maxWidth="max-w-2xl">
@@ -512,10 +527,12 @@ export default function App() {
       if (completionModal.finalImage) updateData.finalImage = completionModal.finalImage;
       
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
-      
       setCompletionModal({ isOpen: false, order: null, finalImage: '' });
-      showNotification("✅ تم تجهيز الطلب وهو جاهز للطباعة!");
-      setPrintData({ ...order, ...updateData }); // عرض الفاتورة للطباعة فوراً
+      showNotification("✅ تم تجهيز الطلب وهو جاهز الآن!");
+    };
+
+    const handlePrintProduction = (order) => {
+      setPrintData(order);
     };
 
     return (
@@ -539,12 +556,15 @@ export default function App() {
                   </div>
                 )}
                 
-                <p className="text-xs text-gray-600 mb-1">طلب: <span className="font-mono font-bold">#{formatOrderNum(o)}</span></p>
+                <p className="text-xs text-gray-600 mb-1">طلب رقم: <span className="font-mono font-bold">#{formatOrderNum(o)}</span></p>
                 {o.notes && <p className="text-sm text-gray-800 mb-4 bg-white p-3 rounded-lg border border-orange-100 flex-1">{o.notes}</p>}
                 
-                <div className="mt-auto pt-4">
-                  <button onClick={() => setCompletionModal({ isOpen: true, order: o, finalImage: '' })} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg text-sm font-bold transition-colors shadow-md flex justify-center items-center gap-2">
-                    <CheckCircle size={20} /> تم التجهيز والطباعة
+                <div className="mt-auto pt-4 flex gap-2">
+                  <button onClick={() => setCompletionModal({ isOpen: true, order: o, finalImage: '' })} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg text-sm font-bold transition-colors shadow-md flex justify-center items-center gap-2">
+                    <CheckCircle size={20} /> تأكيد الإنجاز
+                  </button>
+                  <button onClick={() => handlePrintProduction(o)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg transition-colors shadow-md" title="طباعة تذكرة عمل (للمعمل)">
+                    <Printer size={20} />
                   </button>
                 </div>
               </div>
@@ -582,8 +602,8 @@ export default function App() {
               <input type="file" accept="image/*" onChange={handleCompleteUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
               {completionModal.finalImage && <img src={completionModal.finalImage} alt="final product" className="mt-4 w-full max-h-48 object-contain rounded-lg border shadow-sm mx-auto" />}
             </div>
-            <button onClick={confirmCompletion} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">
-              تأكيد التجهيز والذهاب للطباعة <Printer size={18}/>
+            <button onClick={confirmCompletion} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">
+              تأكيد الإنجاز النهائي <CheckCircle size={18}/>
             </button>
           </div>
         </Modal>
@@ -600,7 +620,7 @@ export default function App() {
     const [form, setForm] = useState({ code: '', name: '', quantity: 1, price: '', image: '' });
     const [sellQty, setSellQty] = useState(1);
 
-    const filteredGoods = finishedGoods.filter(g => g.name.includes(searchTerm) || g.code.includes(searchTerm));
+    const filteredGoods = finishedGoods.filter(g => g.name.includes(searchTerm) || (g.code && g.code.includes(searchTerm)));
 
     const handleUpload = async (e) => {
       const file = e.target.files[0];
@@ -612,12 +632,25 @@ export default function App() {
 
     const handleAddItem = async (e) => {
       e.preventDefault();
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'finished_goods'), {
-        ...form, quantity: Number(form.quantity), price: Number(form.price), addedAt: new Date().toISOString()
-      });
+      
+      const existingItem = finishedGoods.find(item => item.name.trim() === form.name.trim() && item.code === form.code);
+      
+      if (existingItem) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', existingItem.id), {
+          quantity: existingItem.quantity + Number(form.quantity),
+          price: Number(form.price) || existingItem.price,
+          lastAddedAt: new Date().toISOString()
+        });
+        showNotification(`تم إضافة ${form.quantity} للرصيد السابق.`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'finished_goods'), {
+          ...form, quantity: Number(form.quantity), price: Number(form.price), addedAt: new Date().toISOString()
+        });
+        showNotification("تم إضافة المنتج الجديد للمخزن التام.");
+      }
+      
       setAddModalOpen(false);
       setForm({ code: '', name: '', quantity: 1, price: '', image: '' });
-      showNotification("تم إضافة المنتج للمخزن التام.");
     };
 
     const handleSell = async (e) => {
@@ -628,26 +661,27 @@ export default function App() {
       const totalRevenue = sellQty * selectedItem.price;
       const now = new Date().toISOString();
 
-      // تقليل الكمية
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', selectedItem.id), { quantity: newQty });
       
-      // تسجيل المعاملة المالية (إيراد بيع مباشر)
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
         category: 'revenue', type: 'income', amount: totalRevenue,
         description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now
       });
 
-      // تسجيل كطلب مكتمل للحفاظ على السجلات
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
-        customerName: 'بيع مباشر (مخزن)', phone: '-', address: 'تسليم باليد',
-        cakeCategory: selectedItem.name, cakeSize: 'مخزن جاهز', quantity: sellQty,
+      const receiptData = {
+        id: 'DIR-' + Date.now().toString().slice(-6),
+        customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد',
+        cakeCategory: selectedItem.name, cakeSize: 'جاهز من المخزن', quantity: sellQty,
         price: totalRevenue, status: 'completed', createdAt: now, completedAt: now, orderNumber: Date.now() % 10000
-      });
+      };
+
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
 
       setSellModalOpen(false);
       setSelectedItem(null);
       setSellQty(1);
-      showNotification("تم إخراج المنتج وتسجيل عملية البيع بنجاح.");
+      showNotification("تم إخراج المنتج بنجاح.");
+      setPrintData(receiptData); 
     };
 
     return (
@@ -684,7 +718,7 @@ export default function App() {
                   disabled={item.quantity === 0}
                   className="mt-auto w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white py-2 rounded-lg text-sm font-bold transition-colors flex justify-center items-center gap-2"
                 >
-                  <Tag size={16} /> {item.quantity === 0 ? 'نفذت الكمية' : 'بيع مباشر (إخراج)'}
+                  <Printer size={16} /> {item.quantity === 0 ? 'نفذت الكمية' : 'إصدار فاتورة بيع'}
                 </button>
               </div>
             </div>
@@ -697,6 +731,7 @@ export default function App() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">اسم المنتج</label>
               <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none" />
+              <p className="text-xs text-gray-500 mt-1">إذا كان الاسم موجوداً مسبقاً، سيتم تجميع الكمية كـ (رصيد تراكمي).</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -704,7 +739,7 @@ export default function App() {
                 <input type="text" value={form.code} onChange={e => setForm({...form, code: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none dir-ltr text-right" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">الكمية الجاهزة</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">الكمية المضافة</label>
                 <input type="number" required min="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" />
               </div>
             </div>
@@ -717,12 +752,12 @@ export default function App() {
               <input type="file" accept="image/*" onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50" />
               {form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}
             </div>
-            <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg mt-4 transition-colors">إضافة للمخزن</button>
+            <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg mt-4 transition-colors">تأكيد الإضافة</button>
           </form>
         </Modal>
 
         {selectedItem && (
-          <Modal isOpen={isSellModalOpen} onClose={() => setSellModalOpen(false)} title="إخراج (بيع مباشر)">
+          <Modal isOpen={isSellModalOpen} onClose={() => setSellModalOpen(false)} title="إصدار فاتورة بيع مباشر">
             <form onSubmit={handleSell} className="space-y-4">
               <div className="bg-gray-50 p-4 rounded-lg flex items-center gap-4 mb-4 border">
                 {selectedItem.image && <img src={selectedItem.image} className="w-16 h-16 rounded-md object-cover" alt="item"/>}
@@ -739,7 +774,9 @@ export default function App() {
                 <p className="text-sm text-green-800 font-medium">الإجمالي المستحق:</p>
                 <p className="text-2xl font-bold text-green-900">${(sellQty * selectedItem.price).toFixed(2)}</p>
               </div>
-              <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors">تأكيد البيع وتسجيل الإيراد</button>
+              <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
+                تأكيد وطباعة الوصل <Printer size={18}/>
+              </button>
             </form>
           </Modal>
         )}
@@ -811,7 +848,7 @@ export default function App() {
                   <div key={o.id} className="p-4 border border-purple-200 bg-purple-50 rounded-lg">
                      <h4 className="font-bold text-gray-800">{o.customerName} <span className="text-xs text-gray-500 font-normal dir-ltr ml-2 bg-purple-100 px-1 rounded">{o.phone}</span></h4>
                      <p className="text-sm text-gray-600 my-1 font-medium">{o.address}</p>
-                    <button onClick={() => handleDelivered(o)} className="w-full bg-green-500 hover:bg-green-600 text-white py-2 rounded-md text-sm font-semibold transition-colors shadow-sm mt-2">تأكيد الاستلام وإضافة الإيراد</button>
+                    <button onClick={() => handleDelivered(o)} className="w-full bg-green-500 hover:bg-green-600 text-white py-2 rounded-md text-sm font-semibold transition-colors shadow-sm mt-2">تأكيد الاستلام</button>
                   </div>
                 ))}
                  {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2">لا يوجد سائقون في الخارج.</p>}
@@ -1239,7 +1276,7 @@ export default function App() {
       {/* نظام الإشعارات (Toasts) */}
       <div className="fixed top-4 left-4 z-[60] flex flex-col gap-2 pointer-events-none">
         {notifications.map(n => (
-          <div key={n.id} className="bg-slate-800 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-bounce">
+          <div key={n.id} className="bg-slate-800 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-bounce border border-slate-700">
             <Bell size={18} className="text-amber-400" />
             <span className="text-sm font-medium">{n.message}</span>
           </div>
@@ -1253,29 +1290,37 @@ export default function App() {
             <p className="text-sm font-semibold tracking-widest text-slate-500 uppercase">Sweets & Cake</p>
             <p className="mt-6 text-xl font-bold bg-gray-100 inline-block px-6 py-2 rounded-lg border border-gray-200">وصل طلب رقم: #{formatOrderNum(printData)}</p>
           </div>
+          
           <div className="space-y-4 text-lg">
-            <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
-               <p><strong>العميل:</strong> {printData.customerName}</p>
-               <p><strong>الهاتف:</strong> <span className="dir-ltr inline-block font-mono">{printData.phone}</span></p>
-            </div>
-            <p className="p-4 border rounded-lg"><strong>العنوان:</strong> {printData.address}</p>
+            {myProfile?.role !== 'production' ? (
+              <>
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                   <p><strong>العميل:</strong> {printData.customerName}</p>
+                   <p><strong>الهاتف:</strong> <span className="dir-ltr inline-block font-mono">{printData.phone}</span></p>
+                </div>
+                <p className="p-4 border rounded-lg"><strong>العنوان:</strong> {printData.address}</p>
+              </>
+            ) : (
+              <div className="bg-gray-100 p-4 rounded-lg text-center mb-4 border border-gray-300">
+                 <p className="font-bold text-xl text-gray-800">تذكرة عمل داخلية (قسم الإنتاج)</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
                <p><strong>الصنف:</strong> {printData.cakeCategory === 'أخرى (إدخال يدوي)' ? printData.customCakeType : printData.cakeCategory}</p>
                <p><strong>الحجم:</strong> {printData.cakeSize}</p>
                <p><strong>الكمية:</strong> {printData.quantity}</p>
                {printData.weight && <p><strong>الوزن:</strong> {printData.weight}</p>}
             </div>
-            <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl"><strong>الإجمالي المستحق:</strong> ${Number(printData.price).toFixed(2)}</p>
-            {printData.notes && <p className="p-4 border rounded-lg bg-yellow-50"><strong>ملاحظات:</strong> {printData.notes}</p>}
-            {printData.finalImage && (
-              <div className="mt-4 text-center">
-                 <p className="text-sm text-gray-500 mb-2">صورة المنتج النهائي قبل التسليم:</p>
-                 <img src={printData.finalImage} className="max-h-64 mx-auto rounded-lg border object-contain" alt="final"/>
-              </div>
+            
+            {myProfile?.role !== 'production' && (
+              <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl font-bold"><strong>الإجمالي المستحق:</strong> ${Number(printData.price).toFixed(2)}</p>
             )}
+
+            {printData.notes && <p className="p-4 border rounded-lg bg-yellow-50"><strong>ملاحظات هامة:</strong> {printData.notes}</p>}
           </div>
           <div className="mt-8 text-center text-gray-500 text-sm">
-            <p>وقت الطلب: {formatDate(printData.createdAt)}</p>
+            <p>تاريخ ووقت الطلب: {formatDate(printData.createdAt)}</p>
           </div>
         </div>
       )}
@@ -1315,7 +1360,12 @@ export default function App() {
               </div>
               <div className="overflow-hidden">
                 <p className="text-sm font-semibold truncate text-white">{myProfile?.name}</p>
-                <p className="text-xs text-amber-500 font-medium tracking-wider">{myProfile?.role === 'admin' ? 'مدير النظام' : 'موظف'}</p>
+                <p className="text-xs text-amber-500 font-medium tracking-wider">{
+                  myProfile?.role === 'admin' ? 'المدير العام' : 
+                  myProfile?.role === 'production' ? 'الإنتاج والخبز' :
+                  myProfile?.role === 'sales' ? 'المبيعات' :
+                  myProfile?.role === 'delivery' ? 'السائق' : 'موظف'
+                }</p>
               </div>
             </div>
             <button onClick={() => signOut(auth)} className="mt-4 w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-red-600 text-gray-300 hover:text-white py-2 rounded-lg transition-colors text-sm font-medium">
@@ -1338,19 +1388,19 @@ export default function App() {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl w-full mx-auto">
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl w-full mx-auto relative">
             {printData && (
-               <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-800 p-4 md:p-5 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+               <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-800 p-4 md:p-5 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10">
                  <div className="flex items-center gap-3">
                    <Printer size={24} className="text-blue-600 flex-shrink-0" />
                    <p className="font-medium text-sm md:text-lg">وضع الطباعة للطلب <span className="font-mono bg-blue-100 px-2 rounded">#{formatOrderNum(printData)}</span></p>
                  </div>
                  <div className="flex gap-2 w-full md:w-auto">
                    <button onClick={() => window.print()} className="flex-1 md:flex-none bg-blue-600 text-white px-5 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                      <Printer size={18} /> طباعة
+                      <Printer size={18} /> طباعة الفاتورة
                    </button>
-                   <button onClick={() => setPrintData(null)} className="flex-1 md:flex-none bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg shadow hover:bg-gray-100 transition-colors text-center">
-                      إغلاق
+                   <button onClick={() => setPrintData(null)} className="flex-1 md:flex-none bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg shadow hover:bg-gray-100 transition-colors text-center font-bold">
+                      إغلاق نافذة الطباعة
                    </button>
                  </div>
                </div>
