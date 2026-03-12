@@ -6,8 +6,8 @@ import {
   Cake, LayoutDashboard, ShoppingCart, ChefHat, 
   Store as StoreIcon, Truck, DollarSign, Users, 
   Plus, X, CheckCircle, TrendingUp, Package, Clock, AlertCircle,
-  Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck, Sparkles,
-  Menu, Bell, Camera, Box, Tag, Trash2, XCircle
+  Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck,
+  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock
 } from 'lucide-react';
 
 // --- إعدادات فايربيس ---
@@ -44,13 +44,9 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
       <div className={`bg-white rounded-xl shadow-2xl w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden`}>
         <div className="flex justify-between items-center p-5 border-b bg-gray-50">
           <h2 className="text-xl font-bold text-gray-800">{title}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 transition-colors">
-            <X size={24} />
-          </button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 transition-colors"><X size={24} /></button>
         </div>
-        <div className="p-5 overflow-y-auto">
-          {children}
-        </div>
+        <div className="p-5 overflow-y-auto custom-scrollbar">{children}</div>
       </div>
     </div>
   );
@@ -58,65 +54,35 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
 
 const StatCard = ({ title, value, icon: Icon, colorClass }) => (
   <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
-    <div className={`p-4 rounded-lg flex-shrink-0 ${colorClass}`}>
-      <Icon size={28} />
-    </div>
-    <div>
-      <p className="text-sm font-medium text-gray-500">{title}</p>
-      <h3 className="text-2xl font-bold text-gray-900">{value}</h3>
-    </div>
+    <div className={`p-4 rounded-lg flex-shrink-0 ${colorClass}`}><Icon size={28} /></div>
+    <div><p className="text-sm font-medium text-gray-500">{title}</p><h3 className="text-2xl font-bold text-gray-900">{value}</h3></div>
   </div>
 );
 
 const Table = ({ headers, children }) => (
   <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-100 w-full">
     <table className="w-full text-right border-collapse min-w-[600px]">
-      <thead>
-        <tr className="bg-gray-50 border-b border-gray-100">
-          {headers.map((h, i) => <th key={i} className="p-4 font-semibold text-gray-600 text-sm whitespace-nowrap">{h}</th>)}
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-gray-100">
-        {children}
-      </tbody>
+      <thead><tr className="bg-gray-50 border-b border-gray-100">{headers.map((h, i) => <th key={i} className="p-4 font-semibold text-gray-600 text-sm whitespace-nowrap">{h}</th>)}</tr></thead>
+      <tbody className="divide-y divide-gray-100">{children}</tbody>
     </table>
   </div>
 );
 
 const StatusBadge = ({ status }) => {
-  const styles = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    ready: 'bg-blue-100 text-blue-800',
-    out_for_delivery: 'bg-purple-100 text-purple-800',
-    completed: 'bg-green-100 text-green-800',
-    cancelled: 'bg-red-100 text-red-800'
-  };
-  const labels = {
-    pending: 'جاري التحضير', 
-    ready: 'تم التجهيز',
-    out_for_delivery: 'في الطريق', 
-    completed: 'مكتمل',
-    cancelled: 'ملغي'
-  };
-  return (
-    <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>
-      {labels[status] || status}
-    </span>
-  );
+  const styles = { pending: 'bg-yellow-100 text-yellow-800', ready: 'bg-blue-100 text-blue-800', out_for_delivery: 'bg-purple-100 text-purple-800', completed: 'bg-green-100 text-green-800', cancelled: 'bg-red-100 text-red-800' };
+  const labels = { pending: 'جاري التحضير', ready: 'تم التجهيز', out_for_delivery: 'في الطريق', completed: 'مكتمل', cancelled: 'ملغي' };
+  return <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>{labels[status] || status}</span>;
 };
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleString('ar-IQ', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+  return new Date(dateStr).toLocaleString('ar-IQ', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 const formatOrderNum = (order) => order.orderNumber ? String(order.orderNumber).padStart(4, '0') : order.id.slice(0,6).toUpperCase();
 
 const getSystemEmail = (userStr) => `${userStr.trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
 
-// --- ضغط ومعالجة الصور ---
 const compressImage = (file, maxWidth = 600) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -137,6 +103,55 @@ const compressImage = (file, maxWidth = 600) => {
   });
 };
 
+// --- مكون العداد التنازلي ---
+const Countdown = ({ deliveryDate }) => {
+  const [timeLeft, setTimeLeft] = useState('');
+  const [isLate, setIsLate] = useState(false);
+
+  useEffect(() => {
+    if (!deliveryDate) return;
+    
+    const calculateTime = () => {
+      const target = new Date(deliveryDate).getTime();
+      const now = new Date().getTime();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        setIsLate(true);
+        setTimeLeft('متأخر عن الموعد!');
+        return;
+      }
+
+      const targetDateObj = new Date(deliveryDate);
+      const todayObj = new Date();
+      const isToday = targetDateObj.getDate() === todayObj.getDate() && targetDateObj.getMonth() === todayObj.getMonth() && targetDateObj.getFullYear() === todayObj.getFullYear();
+
+      if (isToday) {
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        setTimeLeft(`متبقي ${hours} ساعة و ${minutes} دقيقة`);
+        setIsLate(false);
+      } else {
+        setTimeLeft(new Date(deliveryDate).toLocaleDateString('ar-IQ', { weekday: 'long', month: 'short', day: 'numeric' }));
+        setIsLate(false);
+      }
+    };
+
+    calculateTime();
+    const timer = setInterval(calculateTime, 60000); // تحديث كل دقيقة
+    return () => clearInterval(timer);
+  }, [deliveryDate]);
+
+  if (!deliveryDate) return null;
+
+  return (
+    <div className={`flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-md ${isLate ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse' : timeLeft.includes('متبقي') ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-100 text-gray-600'}`}>
+      <CalendarClock size={14} />
+      <span>{timeLeft}</span>
+    </div>
+  );
+};
+
 // --- المكون الرئيسي ---
 export default function App() {
   const [user, setUser] = useState(null);
@@ -144,7 +159,6 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   
-  // App Data States
   const [profiles, setProfiles] = useState([]);
   const [orders, setOrders] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -152,56 +166,40 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const prevOrderCount = useRef(0);
   
-  // UI States
-  const [activeTab, setActiveTab] = useState('Dashboard');
+  const [activeTab, setActiveTab] = useState('Orders');
   const [joinName, setJoinName] = useState('');
   const [printData, setPrintData] = useState(null);
 
-  // Auth States
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isSetupMode, setIsSetupMode] = useState(false);
   const [authError, setAuthError] = useState('');
 
-  // دالة الإشعارات
   const showNotification = (message) => {
     const id = Date.now();
     setNotifications(prev => [...prev, { id, message }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 4000);
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setAuthLoading(false);
-    });
+    const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setAuthLoading(false); });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!user) return;
-
     const dataPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
 
     const unsubProfiles = onSnapshot(dataPath('profiles'), (snap) => setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    
     const unsubOrders = onSnapshot(dataPath('orders'), (snap) => {
         const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         fetchedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        
-        if (prevOrderCount.current !== 0 && fetchedOrders.length > prevOrderCount.current) {
-           showNotification("🔔 تم إضافة طلب جديد للنظام!");
-        }
+        if (prevOrderCount.current !== 0 && fetchedOrders.length > prevOrderCount.current) showNotification("🔔 تم إضافة طلب جديد!");
         prevOrderCount.current = fetchedOrders.length;
         setOrders(fetchedOrders);
     });
-    
     const unsubInventory = onSnapshot(dataPath('inventory'), (snap) => setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    
     const unsubFinished = onSnapshot(dataPath('finished_goods'), (snap) => setFinishedGoods(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    
     const unsubTransactions = onSnapshot(dataPath('transactions'), (snap) => {
         const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         txs.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -212,6 +210,14 @@ export default function App() {
   }, [user]);
 
   const myProfile = profiles.find(p => p.uid === user?.uid);
+
+  useEffect(() => {
+    if (myProfile && !hasAccess('Dashboard') && activeTab === 'Dashboard') {
+      setActiveTab('Orders');
+    } else if (myProfile && hasAccess('Dashboard') && activeTab === 'Orders' && myProfile.role !== 'sales') {
+        setActiveTab('Dashboard');
+    }
+  }, [myProfile]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -241,14 +247,16 @@ export default function App() {
     if (!myProfile) return false;
     const role = myProfile.role;
     if (role === 'admin') return true;
+    
     const permissions = {
       manager: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery', 'Sales', 'Finance'],
-      sales: ['Dashboard', 'Orders', 'FinishedGoods', 'Sales'],
-      production: ['Dashboard', 'Production'],
-      store: ['Dashboard', 'FinishedGoods', 'Store'],
-      delivery: ['Dashboard', 'Delivery'],
-      finance: ['Dashboard', 'Finance', 'Sales'],
-      staff: ['Dashboard']
+      operations: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery'],
+      sales: ['Orders', 'FinishedGoods', 'Sales'],
+      production: ['Production'],
+      store: ['FinishedGoods', 'Store'],
+      delivery: ['Delivery'],
+      finance: ['Finance', 'Sales'],
+      staff: []
     };
     return permissions[role]?.includes(tabId) || false;
   };
@@ -309,8 +317,10 @@ export default function App() {
     
     const [form, setForm] = useState({ 
       customerName: '', phone: '', address: '', 
+      orderSource: 'manufacturing',
       cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '',
-      quantity: 1, weight: '', price: '', notes: '', images: [] 
+      quantity: 1, weight: '', price: '', notes: '', images: [],
+      deliveryDate: '' 
     });
 
     const filteredOrders = orders.filter(o => {
@@ -328,18 +338,17 @@ export default function App() {
       const base64Images = await Promise.all(files.map(f => compressImage(f)));
       setForm(prev => ({ ...prev, images: [...prev.images, ...base64Images] }));
     };
-
-    const removeImage = (index) => {
-      setForm(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
-    };
+    const removeImage = (index) => setForm(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
 
     const handleEdit = (order) => {
       setEditingId(order.id);
       setForm({
         customerName: order.customerName || '', phone: order.phone || '', address: order.address || '',
+        orderSource: order.orderSource || 'manufacturing',
         cakeCategory: order.cakeCategory || 'أخرى (إدخال يدوي)', cakeSize: order.cakeSize || '', customCakeType: order.customCakeType || '',
         quantity: order.quantity || 1, weight: order.weight || '', price: order.price || '',
-        notes: order.notes || '', images: order.images || (order.imageUrl ? [order.imageUrl] : [])
+        notes: order.notes || '', images: order.images || (order.imageUrl ? [order.imageUrl] : []),
+        deliveryDate: order.deliveryDate || ''
       });
       setModalOpen(true);
     };
@@ -353,17 +362,20 @@ export default function App() {
 
     const handleSubmit = async (e) => {
       e.preventDefault();
+      
+      const initialStatus = form.orderSource === 'ready_made' ? 'ready' : 'pending';
+
       if (editingId) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', editingId), { ...form, updatedAt: new Date().toISOString() });
       } else {
         const nextOrderNum = orders.length > 0 ? Math.max(...orders.map(o => o.orderNumber || 0)) + 1 : 1;
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
-          ...form, status: 'pending', createdAt: new Date().toISOString(), orderNumber: nextOrderNum
+          ...form, status: initialStatus, createdAt: new Date().toISOString(), orderNumber: nextOrderNum
         });
       }
       setModalOpen(false);
       setEditingId(null);
-      setForm({ customerName: '', phone: '', address: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '', quantity: 1, weight: '', price: '', notes: '', images: [] });
+      setForm({ customerName: '', phone: '', address: '', orderSource: 'manufacturing', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '', quantity: 1, weight: '', price: '', notes: '', images: [], deliveryDate: '' });
     };
 
     return (
@@ -375,7 +387,7 @@ export default function App() {
               <Search className="absolute right-3 top-2.5 text-gray-400" size={20} />
               <input type="text" placeholder="بحث بالاسم، الهاتف، الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
             </div>
-            <button onClick={() => { setEditingId(null); setForm({ customerName: '', phone: '', address: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '', quantity: 1, weight: '', price: '', notes: '', images: [] }); setModalOpen(true); }} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors whitespace-nowrap">
+            <button onClick={() => { setEditingId(null); setForm({ customerName: '', phone: '', address: '', orderSource: 'manufacturing', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '', quantity: 1, weight: '', price: '', notes: '', images: [], deliveryDate: '' }); setModalOpen(true); }} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors whitespace-nowrap">
               <Plus size={20} /> طلب جديد
             </button>
           </div>
@@ -388,7 +400,7 @@ export default function App() {
           <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filter === 'all' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الكل</button>
         </div>
         
-        <Table headers={['الصور', 'رقم الطلب', 'العميل', 'تفاصيل الصنف', 'السعر', 'الحالة', 'إجراء']}>
+        <Table headers={['الصور', 'رقم الطلب', 'العميل', 'تفاصيل الصنف', 'الموعد', 'الحالة', 'إجراء']}>
           {filteredOrders.map(o => (
             <tr key={o.id} className="hover:bg-gray-50 transition-colors">
               <td className="p-4">
@@ -399,7 +411,10 @@ export default function App() {
                   </div>
                 ) : <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-400 border"><ImageIcon size={16}/></div>}
               </td>
-              <td className="p-4 font-mono text-sm text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+              <td className="p-4 font-mono text-sm text-gray-500 font-bold">
+                #{formatOrderNum(o)}
+                {o.orderSource === 'ready_made' && <span className="block mt-1 text-[10px] bg-green-100 text-green-700 px-1 py-0.5 rounded text-center">مخزن تام</span>}
+              </td>
               <td className="p-4">
                 <p className="font-medium text-gray-800">{o.customerName}</p>
                 <p className="text-xs text-gray-500 dir-ltr text-right font-mono">{o.phone}</p>
@@ -408,13 +423,18 @@ export default function App() {
                 <span className="font-bold">{o.cakeCategory === 'أخرى (إدخال يدوي)' ? o.customCakeType : o.cakeCategory}</span>
                 <span className="block text-xs text-gray-500 mt-1">{o.cakeSize} | {o.quantity} قطعة {o.weight && `| الوزن: ${o.weight}`}</span>
               </td>
-              <td className="p-4 font-semibold text-gray-700">${Number(o.price).toFixed(2)}</td>
+              <td className="p-4">
+                 <Countdown deliveryDate={o.deliveryDate} />
+              </td>
               <td className="p-4"><StatusBadge status={o.status} /></td>
               <td className="p-4 flex gap-2">
+                <button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors" title="طباعة الفاتورة">
+                  <Printer size={18} />
+                </button>
                 <button onClick={() => handleEdit(o)} className="text-blue-600 hover:text-blue-800 p-2 bg-blue-50 rounded-lg transition-colors" title="تعديل">
                   <Edit size={18} />
                 </button>
-                {o.status !== 'cancelled' && (
+                {o.status !== 'cancelled' && o.status !== 'completed' && (
                   <button onClick={() => handleCancelOrder(o.id)} className="text-red-600 hover:text-red-800 p-2 bg-red-50 rounded-lg transition-colors" title="إلغاء الطلب">
                     <Trash2 size={18} />
                   </button>
@@ -427,6 +447,18 @@ export default function App() {
 
         <Modal isOpen={isModalOpen} onClose={() => setModalOpen(false)} title={editingId ? "تعديل الطلب" : "إنشاء طلب جديد"} maxWidth="max-w-2xl">
           <form onSubmit={handleSubmit} className="space-y-4">
+            
+            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-4 flex gap-4">
+               <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-blue-900">
+                 <input type="radio" name="orderSource" value="manufacturing" checked={form.orderSource === 'manufacturing'} onChange={e => setForm({...form, orderSource: e.target.value})} className="w-4 h-4 text-blue-600 focus:ring-blue-500" />
+                 تصنيع جديد (للمعمل)
+               </label>
+               <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-green-900">
+                 <input type="radio" name="orderSource" value="ready_made" checked={form.orderSource === 'ready_made'} onChange={e => setForm({...form, orderSource: e.target.value})} className="w-4 h-4 text-green-600 focus:ring-green-500" />
+                 سحب من المخزن التام (جاهز)
+               </label>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">اسم العميل</label>
@@ -455,7 +487,7 @@ export default function App() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">الحجم / التفاصيل</label>
                   <select value={form.cakeSize} onChange={e => setForm({...form, cakeSize: e.target.value})} className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-amber-500 bg-white">
-                    {CAKE_CATEGORIES[form.cakeCategory].map(sz => <option key={sz} value={sz}>{sz}</option>)}
+                    {CAKE_CATEGORIES[form.cakeCategory]?.map(sz => <option key={sz} value={sz}>{sz}</option>)}
                   </select>
                 </div>
               )}
@@ -476,18 +508,25 @@ export default function App() {
               </div>
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">عنوان التوصيل</label>
-              <textarea required value={form.address} onChange={e => setForm({...form, address: e.target.value})} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" rows="2"></textarea>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">موعد التسليم للزبون</label>
+                <input type="datetime-local" required value={form.deliveryDate} onChange={e => setForm({...form, deliveryDate: e.target.value})} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">عنوان التوصيل</label>
+                <textarea required value={form.address} onChange={e => setForm({...form, address: e.target.value})} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" rows="1"></textarea>
+              </div>
             </div>
 
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <label className="block text-sm font-medium text-gray-700 mb-2">إرفاق صور التصميم (يمكن اختيار عدة صور)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">إرفاق صور التصميم (الصورة الأولى ستطبع مع الوصل)</label>
               <input type="file" multiple accept="image/*" onChange={handleMultipleUpload} className="w-full p-2 border border-gray-300 rounded-lg bg-white mb-3" />
               <div className="flex gap-2 flex-wrap">
                 {form.images.map((img, idx) => (
                   <div key={idx} className="relative group">
                     <img src={img} alt="preview" className="h-20 w-20 object-cover rounded-lg shadow-sm border border-gray-300" />
+                    {idx === 0 && <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] text-center rounded-b-lg">رئيسية</span>}
                     <button type="button" onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
                   </div>
                 ))}
@@ -507,10 +546,87 @@ export default function App() {
     );
   };
 
+  // --- نافذة تفاصيل الطلب المشتركة المحدثة ---
+  const OrderDetailsModal = ({ isOpen, onClose, order, type, onAction, onSecondaryAction }) => {
+    if (!isOpen || !order) return null;
+    // إذا فُتحت النافذة من قسم الإنتاج، يتم إخفاء معلومات العميل والسعر تماماً للجميع
+    const hideSensitiveInfo = type === 'production';
+
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title={`تفاصيل طلب #${formatOrderNum(order)}`} maxWidth="max-w-lg">
+        <div className="space-y-4">
+           {/* معلومات الزبون (مخفية في قسم الإنتاج) */}
+           {!hideSensitiveInfo && (
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <p className="font-bold text-gray-800 text-lg mb-1">{order.customerName}</p>
+                <div className="flex justify-between text-sm text-gray-600 mb-2">
+                  <span className="dir-ltr font-mono">{order.phone}</span>
+                  <span className="font-bold text-green-700">السعر: ${Number(order.price).toFixed(2)}</span>
+                </div>
+                <p className="text-sm text-gray-700 bg-white p-2 rounded border"><span className="font-bold">العنوان:</span> {order.address}</p>
+              </div>
+           )}
+
+           {/* معلومات الكيك (تظهر للكل) */}
+           <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
+              <div className="flex justify-between items-start mb-2">
+                 <div>
+                   <p className="font-bold text-amber-900 text-lg">{order.cakeCategory === 'أخرى (إدخال يدوي)' ? order.customCakeType : order.cakeCategory}</p>
+                   <p className="text-sm text-amber-800">{order.cakeSize} {order.weight && `| الوزن: ${order.weight}`}</p>
+                 </div>
+                 <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-lg font-bold shadow-sm">{order.quantity} قطعة</span>
+              </div>
+              {order.notes && <p className="mt-3 text-sm text-amber-900 bg-white p-3 rounded-lg border border-amber-100"><span className="font-bold">ملاحظات:</span> {order.notes}</p>}
+           </div>
+
+           {/* العداد الزمني */}
+           <div className="flex justify-center p-2 bg-gray-50 rounded-xl border">
+              <Countdown deliveryDate={order.deliveryDate} />
+           </div>
+
+           {/* الصور */}
+           {order.images && order.images.length > 0 && (
+             <div>
+               <p className="text-sm font-bold text-gray-700 mb-2">صور التصميم المرفقة:</p>
+               <div className="grid grid-cols-3 gap-2">
+                 {order.images.map((img, i) => <img key={i} src={img} alt="design" className="w-full h-24 object-cover rounded-lg border shadow-sm" />)}
+               </div>
+             </div>
+           )}
+
+           {/* أزرار الإجراءات */}
+           <div className="pt-4 border-t border-gray-100 flex gap-2">
+              {type === 'production' && (
+                <>
+                  <button onClick={() => onAction(order)} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">
+                    <CheckCircle size={20} /> تأكيد إنجاز الطلب
+                  </button>
+                  <button onClick={() => onSecondaryAction(order)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة تذكرة عمل (للمعمل)">
+                    <Printer size={20} />
+                  </button>
+                </>
+              )}
+              {type === 'delivery_dispatch' && (
+                <button onClick={() => onAction(order)} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">
+                   <Truck size={20} /> إرسال مع السائق
+                </button>
+              )}
+              {type === 'delivery_complete' && (
+                <button onClick={() => onAction(order)} className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">
+                   <CheckCircle size={20} /> تأكيد استلام الزبون وإضافة الإيراد
+                </button>
+              )}
+           </div>
+        </div>
+      </Modal>
+    );
+  };
+
   const ProductionView = () => {
     const activeOrders = orders.filter(o => o.status === 'pending');
     const completedOrders = orders.filter(o => ['ready', 'out_for_delivery', 'completed'].includes(o.status)).slice(0, 15);
     
+    const [selectedOrder, setSelectedOrder] = useState(null);
     const [completionModal, setCompletionModal] = useState({ isOpen: false, order: null, finalImage: '' });
 
     const handleCompleteUpload = async (e) => {
@@ -528,11 +644,16 @@ export default function App() {
       
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
       setCompletionModal({ isOpen: false, order: null, finalImage: '' });
+      setSelectedOrder(null); 
       showNotification("✅ تم تجهيز الطلب وهو جاهز الآن!");
     };
 
+    const triggerCompletion = (order) => {
+       setCompletionModal({ isOpen: true, order: order, finalImage: '' });
+    };
+
     const handlePrintProduction = (order) => {
-      setPrintData(order);
+      setPrintData({ ...order, printType: 'production' }); // تحديد نوع الطباعة
     };
 
     return (
@@ -541,56 +662,31 @@ export default function App() {
         
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 md:p-6">
           <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2 text-lg"><Clock className="text-orange-500"/> جاري التحضير (الطلبات الحالية)</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
             {activeOrders.map(o => (
-              <div key={o.id} className="p-4 border border-orange-200 bg-orange-50/50 rounded-xl relative shadow-sm flex flex-col">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="font-bold text-gray-900 text-lg">{o.cakeCategory === 'أخرى (إدخال يدوي)' ? o.customCakeType : o.cakeCategory}</span>
-                  <span className="text-sm bg-orange-200 text-orange-900 px-2 py-1 rounded font-bold shadow-sm whitespace-nowrap">{o.quantity} ق</span>
-                </div>
-                <p className="text-sm text-orange-800 font-medium mb-3 border-b border-orange-200 pb-2">{o.cakeSize} {o.weight && `| الوزن: ${o.weight}`}</p>
-                
-                {o.images && o.images.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pb-2 mb-2 custom-scrollbar">
-                    {o.images.map((img, i) => <img key={i} src={img} alt="ref" className="h-24 w-24 object-cover rounded-lg border shadow-sm flex-shrink-0" />)}
-                  </div>
-                )}
-                
-                <p className="text-xs text-gray-600 mb-1">طلب رقم: <span className="font-mono font-bold">#{formatOrderNum(o)}</span></p>
-                {o.notes && <p className="text-sm text-gray-800 mb-4 bg-white p-3 rounded-lg border border-orange-100 flex-1">{o.notes}</p>}
-                
-                <div className="mt-auto pt-4 flex gap-2">
-                  <button onClick={() => setCompletionModal({ isOpen: true, order: o, finalImage: '' })} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg text-sm font-bold transition-colors shadow-md flex justify-center items-center gap-2">
-                    <CheckCircle size={20} /> تأكيد الإنجاز
-                  </button>
-                  <button onClick={() => handlePrintProduction(o)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg transition-colors shadow-md" title="طباعة تذكرة عمل (للمعمل)">
-                    <Printer size={20} />
-                  </button>
-                </div>
+              <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-orange-200 bg-orange-50/50 rounded-xl relative shadow-sm cursor-pointer hover:bg-orange-100 hover:shadow-md transition-all flex flex-col h-full text-center">
+                 <span className="font-mono font-bold text-gray-500 text-xs mb-1">#{formatOrderNum(o)}</span>
+                 <p className="font-bold text-gray-900 text-sm mb-2 flex-1 line-clamp-2">{o.cakeCategory === 'أخرى (إدخال يدوي)' ? o.customCakeType : o.cakeCategory}</p>
+                 {o.images && o.images.length > 0 ? (
+                    <img src={o.images[0]} className="w-full h-20 object-cover rounded-lg mb-2" alt="ref" />
+                 ) : (
+                    <div className="w-full h-20 bg-gray-100 rounded-lg flex items-center justify-center mb-2 text-gray-400"><ImageIcon size={24}/></div>
+                 )}
+                 <Countdown deliveryDate={o.deliveryDate} />
               </div>
             ))}
             {activeOrders.length === 0 && <p className="text-sm text-gray-400 col-span-full text-center py-8">لا توجد طلبات قيد التحضير حالياً.</p>}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 md:p-6 mt-6">
-          <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><CheckCircle size={20} className="text-green-500"/> سجل المنجز للإنتاج</h3>
-          <Table headers={['رقم الطلب', 'صورة النهاية', 'الصنف', 'الكمية', 'وقت الإنجاز', 'الحالة']}>
-            {completedOrders.map(o => (
-              <tr key={o.id} className="hover:bg-gray-50">
-                <td className="p-4 font-mono text-sm text-gray-500 font-bold">#{formatOrderNum(o)}</td>
-                <td className="p-4">
-                  {o.finalImage ? <img src={o.finalImage} className="w-12 h-12 rounded object-cover border" alt="final"/> : <span className="text-xs text-gray-400">لا توجد</span>}
-                </td>
-                <td className="p-4 font-medium">{o.cakeCategory === 'أخرى (إدخال يدوي)' ? o.customCakeType : o.cakeCategory}</td>
-                <td className="p-4">{o.quantity}</td>
-                <td className="p-4 text-sm text-gray-500">{formatDate(o.updatedAt || o.createdAt)}</td>
-                <td className="p-4"><StatusBadge status={o.status} /></td>
-              </tr>
-            ))}
-            {completedOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">السجل فارغ.</td></tr>}
-          </Table>
-        </div>
+        <OrderDetailsModal 
+           isOpen={!!selectedOrder} 
+           onClose={() => setSelectedOrder(null)} 
+           order={selectedOrder} 
+           type="production"
+           onAction={triggerCompletion}
+           onSecondaryAction={handlePrintProduction}
+        />
 
         <Modal isOpen={completionModal.isOpen} onClose={() => setCompletionModal({ isOpen: false, order: null, finalImage: '' })} title="تأكيد تجهيز الطلب">
           <div className="space-y-4">
@@ -672,7 +768,10 @@ export default function App() {
         id: 'DIR-' + Date.now().toString().slice(-6),
         customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد',
         cakeCategory: selectedItem.name, cakeSize: 'جاهز من المخزن', quantity: sellQty,
-        price: totalRevenue, status: 'completed', createdAt: now, completedAt: now, orderNumber: Date.now() % 10000
+        price: totalRevenue, status: 'completed', createdAt: now, completedAt: now, orderNumber: Date.now() % 10000,
+        images: selectedItem.image ? [selectedItem.image] : [],
+        deliveryDate: now,
+        printType: 'receipt'
       };
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
@@ -787,6 +886,7 @@ export default function App() {
   const DeliveryView = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState('active');
+    const [selectedOrder, setSelectedOrder] = useState(null);
 
     const activeDeliveries = orders.filter(o => ['ready', 'out_for_delivery'].includes(o.status));
     const historyDeliveries = orders.filter(o => o.status === 'completed');
@@ -796,8 +896,9 @@ export default function App() {
       return o.customerName?.includes(searchTerm) || o.phone?.includes(searchTerm) || o.address?.includes(searchTerm) || orderSearchNum.includes(searchTerm);
     });
 
-    const handleDispatch = async (id) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
+    const handleDispatch = async (order) => {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
+      setSelectedOrder(null);
     };
 
     const handleDelivered = async (order) => {
@@ -807,6 +908,7 @@ export default function App() {
         category: 'revenue', type: 'income', amount: Number(order.price),
         description: `إيراد طلب: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
       });
+      setSelectedOrder(null);
       showNotification("تم تسليم الطلب وإضافة قيمته للحسابات.");
     };
 
@@ -829,29 +931,31 @@ export default function App() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {displayedOrders.filter(o => o.status === 'ready').map(o => (
-                  <div key={o.id} className="p-4 border border-blue-200 bg-blue-50 rounded-lg">
-                    <h4 className="font-bold text-gray-800">{o.customerName} <span className="text-xs text-gray-500 font-normal dir-ltr ml-2 bg-blue-100 px-1 rounded">{o.phone}</span></h4>
-                    <p className="text-sm text-gray-600 my-1 font-medium">{o.address}</p>
-                    <p className="text-xs text-blue-700 font-medium mb-3">رقم: #{formatOrderNum(o)} | {o.quantity}x {o.cakeCategory}</p>
-                    <button onClick={() => handleDispatch(o.id)} className="w-full bg-purple-500 hover:bg-purple-600 text-white py-2 rounded-md text-sm font-semibold transition-colors shadow-sm">إرسال مع السائق</button>
+                  <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
+                    <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                    <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName}</h4>
+                    <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address}</p>
+                    <div className="mt-auto pt-2"><Countdown deliveryDate={o.deliveryDate} /></div>
                   </div>
                 ))}
-                {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2">لا توجد طلبات.</p>}
+                {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات.</p>}
               </div>
             </div>
+            
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
-                  <div key={o.id} className="p-4 border border-purple-200 bg-purple-50 rounded-lg">
-                     <h4 className="font-bold text-gray-800">{o.customerName} <span className="text-xs text-gray-500 font-normal dir-ltr ml-2 bg-purple-100 px-1 rounded">{o.phone}</span></h4>
-                     <p className="text-sm text-gray-600 my-1 font-medium">{o.address}</p>
-                    <button onClick={() => handleDelivered(o)} className="w-full bg-green-500 hover:bg-green-600 text-white py-2 rounded-md text-sm font-semibold transition-colors shadow-sm mt-2">تأكيد الاستلام</button>
+                  <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
+                     <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                     <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName}</h4>
+                     <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address}</p>
+                     <div className="mt-auto pt-2"><Countdown deliveryDate={o.deliveryDate} /></div>
                   </div>
                 ))}
-                 {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2">لا يوجد سائقون في الخارج.</p>}
+                 {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
               </div>
             </div>
           </div>
@@ -868,6 +972,14 @@ export default function App() {
             ))}
           </Table>
         )}
+
+        <OrderDetailsModal 
+           isOpen={!!selectedOrder} 
+           onClose={() => setSelectedOrder(null)} 
+           order={selectedOrder} 
+           type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : 'delivery_complete'}
+           onAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered}
+        />
       </div>
     );
   };
@@ -1181,7 +1293,7 @@ export default function App() {
                <td className="p-4 text-sm text-gray-600 font-mono bg-gray-100 rounded px-2">{p.username}</td>
                <td className="p-4">
                   <select value={p.role} onChange={(e) => handleRoleChange(p.id, e.target.value)} disabled={p.uid === user.uid} className="p-2 border rounded-lg text-sm bg-white">
-                    <option value="admin">المدير</option><option value="manager">مدير المصنع</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
+                    <option value="admin">المدير</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
                   </select>
                </td>
                <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
@@ -1195,7 +1307,7 @@ export default function App() {
             <input type="text" required placeholder="اسم المستخدم (للدخول)" value={newEmp.username} onChange={e => setNewEmp({...newEmp, username: e.target.value})} className="w-full p-2.5 border rounded-lg dir-ltr text-right" />
             <input type="password" required minLength="6" placeholder="كلمة المرور" value={newEmp.password} onChange={e => setNewEmp({...newEmp, password: e.target.value})} className="w-full p-2.5 border rounded-lg dir-ltr text-right" />
             <select value={newEmp.role} onChange={e => setNewEmp({...newEmp, role: e.target.value})} className="w-full p-2.5 border rounded-lg">
-              <option value="staff">بدون صلاحية</option><option value="manager">مدير مصنع</option><option value="sales">مبيعات</option><option value="production">إنتاج</option><option value="store">مستودع</option><option value="delivery">توصيل</option><option value="finance">مالية</option>
+              <option value="staff">بدون صلاحية</option><option value="manager">مدير مصنع</option><option value="operations">العمليات</option><option value="sales">مبيعات</option><option value="production">إنتاج</option><option value="store">مستودع</option><option value="delivery">توصيل</option><option value="finance">مالية</option>
             </select>
             <button type="submit" className="w-full bg-slate-800 text-white font-bold py-3 rounded-lg">إنشاء الحساب</button>
           </form>
@@ -1211,7 +1323,7 @@ export default function App() {
       <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl">
         <div className="flex flex-col items-center animate-pulse">
           <Cake size={48} className="text-amber-600 mb-4" />
-          <h1 className="text-xl font-bold text-gray-700">جاري تحميل نظام سويت أوبس...</h1>
+          <h1 className="text-xl font-bold text-gray-700">جاري تحميل نظام المصنع...</h1>
         </div>
       </div>
     );
@@ -1220,8 +1332,9 @@ export default function App() {
   if (!user) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
-        <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100">
-          <div className="flex flex-col items-center justify-center mx-auto mb-6">
+        <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
+          <div className="flex flex-col items-center justify-center mx-auto mb-6 mt-2">
              <div className="text-center">
                 <span className="block text-3xl font-serif text-slate-800 tracking-wider font-bold mb-1">BASHEER</span>
                 <span className="block text-2xl font-serif text-slate-800 tracking-wider">ALSHAKARCHY</span>
@@ -1259,21 +1372,24 @@ export default function App() {
           <p className="text-gray-500 mb-6 text-sm">الرجاء إدخال اسمك الحقيقي لتتعرف عليك الإدارة.</p>
           <form onSubmit={handleJoin} className="space-y-4 text-right">
             <input type="text" required value={joinName} onChange={e => setJoinName(e.target.value)} placeholder="الاسم الكامل (مثال: علي محمد)" className="w-full p-3 border rounded-lg" />
-            <button type="submit" className="w-full bg-amber-600 text-white font-bold py-3 rounded-lg">دخول</button>
+            <button type="submit" className="w-full bg-amber-600 text-white font-bold py-3 rounded-lg">دخول النظام</button>
           </form>
         </div>
       </div>
     );
   }
 
+  // تحديد نوع المطبوعات لإخفاء السعر عن تذكرة المعمل
+  const isProductionPrint = printData?.printType === 'production';
+
   return (
     <>
       <style dangerouslySetInnerHTML={{__html: `
         @media print { body * { visibility: hidden; } .print-section, .print-section * { visibility: visible; } .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; background: white; } aside, header, .no-print { display: none !important; } }
-        .custom-scrollbar::-webkit-scrollbar { height: 6px; } .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
       `}} />
       
-      {/* نظام الإشعارات (Toasts) */}
+      {/* الإشعارات */}
       <div className="fixed top-4 left-4 z-[60] flex flex-col gap-2 pointer-events-none">
         {notifications.map(n => (
           <div key={n.id} className="bg-slate-800 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-bounce border border-slate-700">
@@ -1292,18 +1408,22 @@ export default function App() {
           </div>
           
           <div className="space-y-4 text-lg">
-            {myProfile?.role !== 'production' ? (
+            {isProductionPrint ? (
+              <div className="bg-gray-100 p-4 rounded-lg text-center mb-4 border border-gray-300">
+                 <p className="font-bold text-xl text-gray-800">تذكرة عمل داخلية (قسم الإنتاج)</p>
+                 <p className="text-sm mt-2 text-red-600 font-bold">موعد التسليم المطلوب: {formatDate(printData.deliveryDate) || 'غير محدد'}</p>
+              </div>
+            ) : (
               <>
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
                    <p><strong>العميل:</strong> {printData.customerName}</p>
                    <p><strong>الهاتف:</strong> <span className="dir-ltr inline-block font-mono">{printData.phone}</span></p>
                 </div>
-                <p className="p-4 border rounded-lg"><strong>العنوان:</strong> {printData.address}</p>
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                   <p><strong>العنوان:</strong> {printData.address}</p>
+                   <p><strong>موعد التسليم:</strong> {formatDate(printData.deliveryDate) || 'غير محدد'}</p>
+                </div>
               </>
-            ) : (
-              <div className="bg-gray-100 p-4 rounded-lg text-center mb-4 border border-gray-300">
-                 <p className="font-bold text-xl text-gray-800">تذكرة عمل داخلية (قسم الإنتاج)</p>
-              </div>
             )}
 
             <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
@@ -1313,24 +1433,29 @@ export default function App() {
                {printData.weight && <p><strong>الوزن:</strong> {printData.weight}</p>}
             </div>
             
-            {myProfile?.role !== 'production' && (
+            {!isProductionPrint && (
               <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl font-bold"><strong>الإجمالي المستحق:</strong> ${Number(printData.price).toFixed(2)}</p>
             )}
 
             {printData.notes && <p className="p-4 border rounded-lg bg-yellow-50"><strong>ملاحظات هامة:</strong> {printData.notes}</p>}
+
+            {printData.images && printData.images.length > 0 && (
+               <div className="mt-6 text-center">
+                  <p className="text-sm font-bold text-gray-600 mb-2">الصورة المرفقة للتصميم:</p>
+                  <img src={printData.images[0]} className="max-h-64 mx-auto rounded-xl border-2 border-gray-300 object-contain shadow-sm" alt="design" />
+               </div>
+            )}
           </div>
           <div className="mt-8 text-center text-gray-500 text-sm">
-            <p>تاريخ ووقت الطلب: {formatDate(printData.createdAt)}</p>
+            <p>تاريخ ووقت إصدار الطلب: {formatDate(printData.createdAt)}</p>
           </div>
         </div>
       )}
 
       <div className={`flex h-screen bg-gray-50 text-gray-900 overflow-hidden font-sans ${printData ? 'no-print' : ''}`} dir="rtl">
         
-        {/* خلفية معتمة للموبايل عند فتح القائمة الجانبية */}
         {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
 
-        {/* القائمة الجانبية */}
         <aside className={`fixed lg:static inset-y-0 right-0 transform ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 transition-transform duration-300 ease-in-out w-64 bg-gray-900 text-white flex flex-col shadow-2xl lg:shadow-xl z-30`}>
           <div className="p-6 flex flex-col items-center border-b border-gray-800 text-center bg-gray-950 relative">
              <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden absolute top-4 left-4 text-gray-400 hover:text-white"><X size={24}/></button>
@@ -1362,6 +1487,8 @@ export default function App() {
                 <p className="text-sm font-semibold truncate text-white">{myProfile?.name}</p>
                 <p className="text-xs text-amber-500 font-medium tracking-wider">{
                   myProfile?.role === 'admin' ? 'المدير العام' : 
+                  myProfile?.role === 'manager' ? 'مدير المصنع' : 
+                  myProfile?.role === 'operations' ? 'العمليات' : 
                   myProfile?.role === 'production' ? 'الإنتاج والخبز' :
                   myProfile?.role === 'sales' ? 'المبيعات' :
                   myProfile?.role === 'delivery' ? 'السائق' : 'موظف'
@@ -1374,13 +1501,10 @@ export default function App() {
           </div>
         </aside>
 
-        {/* المحتوى الرئيسي */}
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <header className="bg-white border-b border-gray-200 px-4 md:px-8 py-4 flex justify-between items-center z-10 flex-shrink-0">
             <div className="flex items-center gap-3">
-              <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden text-gray-600 hover:text-amber-600 transition-colors">
-                <Menu size={28} />
-              </button>
+              <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden text-gray-600 hover:text-amber-600 transition-colors"><Menu size={28} /></button>
               <h1 className="text-lg md:text-xl font-bold text-gray-800 truncate">{TABS.find(t => t.id === activeTab)?.label}</h1>
             </div>
             <div className="text-xs md:text-sm text-gray-500 font-medium bg-gray-100 px-3 py-1.5 rounded-full hidden sm:block">
@@ -1388,25 +1512,25 @@ export default function App() {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl w-full mx-auto relative">
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-7xl w-full mx-auto relative custom-scrollbar">
             {printData && (
                <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-800 p-4 md:p-5 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10">
                  <div className="flex items-center gap-3">
                    <Printer size={24} className="text-blue-600 flex-shrink-0" />
-                   <p className="font-medium text-sm md:text-lg">وضع الطباعة للطلب <span className="font-mono bg-blue-100 px-2 rounded">#{formatOrderNum(printData)}</span></p>
+                   <p className="font-medium text-sm md:text-lg">وضع الطباعة {isProductionPrint ? '(تذكرة معمل بدون سعر)' : 'للفاتورة الكاملة'} <span className="font-mono bg-blue-100 px-2 rounded">#{formatOrderNum(printData)}</span></p>
                  </div>
                  <div className="flex gap-2 w-full md:w-auto">
                    <button onClick={() => window.print()} className="flex-1 md:flex-none bg-blue-600 text-white px-5 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                      <Printer size={18} /> طباعة الفاتورة
+                      <Printer size={18} /> طباعة
                    </button>
                    <button onClick={() => setPrintData(null)} className="flex-1 md:flex-none bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg shadow hover:bg-gray-100 transition-colors text-center font-bold">
-                      إغلاق نافذة الطباعة
+                      إغلاق
                    </button>
                  </div>
                </div>
             )}
 
-            {activeTab === 'Dashboard' && <DashboardView />}
+            {activeTab === 'Dashboard' && hasAccess('Dashboard') && <DashboardView />}
             {activeTab === 'Orders' && <OrdersView />}
             {activeTab === 'Production' && <ProductionView />}
             {activeTab === 'FinishedGoods' && <FinishedGoodsView />}
