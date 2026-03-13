@@ -145,7 +145,7 @@ const Countdown = ({ deliveryDate }) => {
   if (!deliveryDate) return null;
 
   return (
-    <div className={`flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-md ${isLate ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse' : timeLeft.includes('متبقي') ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-100 text-gray-600'}`}>
+    <div className={`flex items-center justify-center gap-1.5 text-xs font-bold px-2 py-1 rounded-md ${isLate ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse' : timeLeft.includes('متبقي') ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-100 text-gray-600'}`}>
       <CalendarClock size={14} />
       <span>{timeLeft}</span>
     </div>
@@ -296,7 +296,7 @@ export default function App() {
             {orders.slice(0, 5).map(o => (
               <div key={o.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 border-b border-gray-100 last:border-0 gap-2">
                 <div>
-                  <p className="font-semibold text-gray-800">{myProfile?.role === 'production' ? 'طلب مخفي الإسم' : o.customerName} - {o.cakeCategory}</p>
+                  <p className="font-semibold text-gray-800">{o.customerName} - {o.cakeCategory}</p>
                   <p className="text-xs text-gray-500">{formatDate(o.createdAt)}</p>
                 </div>
                 <div className="self-start sm:self-auto"><StatusBadge status={o.status} /></div>
@@ -367,14 +367,12 @@ export default function App() {
       
       let finalForm = { ...form };
       
-      // التفاعل مع المخزن التام في حالة إنشاء طلب جديد (الخصم المباشر)
       if (form.orderSource === 'ready_made' && !editingId) {
         const item = finishedGoods.find(g => g.id === selectedFG);
         if (!item || item.quantity < form.quantity) {
            alert('الكمية المطلوبة غير متوفرة في المخزن التام!');
            return;
         }
-        // خصم الكمية
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', item.id), {
            quantity: item.quantity - form.quantity
         });
@@ -590,7 +588,7 @@ export default function App() {
               <textarea value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" rows="2"></textarea>
             </div>
             <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg mt-4 transition-colors">
-              {editingId ? "حفظ التعديلات" : form.orderSource === 'ready_made' ? "تأكيد السحب من المخزن" : "حفظ الطلب للمعمل"}
+              {editingId ? "حفظ التعديلات" : form.orderSource === 'ready_made' ? "تأكيد السحب والتحويل للتوصيل" : "حفظ الطلب للمعمل"}
             </button>
           </form>
         </Modal>
@@ -692,7 +690,7 @@ export default function App() {
     const completedOrders = orders.filter(o => ['ready', 'out_for_delivery', 'completed'].includes(o.status)).slice(0, 10);
     
     const [selectedOrder, setSelectedOrder] = useState(null);
-    const [orderType, setOrderType] = useState(''); // لمعرفة حالة الطلب المفتوح
+    const [orderType, setOrderType] = useState(''); 
     const [completionModal, setCompletionModal] = useState({ isOpen: false, order: null, finalImage: '' });
 
     const handleStartBaking = async (order) => {
@@ -702,8 +700,8 @@ export default function App() {
     };
 
     const triggerCompletion = (order) => {
-       setSelectedOrder(null); // غلق نافذة التفاصيل
-       setCompletionModal({ isOpen: true, order: order, finalImage: '' }); // فتح نافذة الصورة
+       setSelectedOrder(null);
+       setCompletionModal({ isOpen: true, order: order, finalImage: '' }); 
     };
 
     const handleCompleteUpload = async (e) => {
@@ -829,6 +827,9 @@ export default function App() {
     
     const [form, setForm] = useState({ code: '', name: '', quantity: 1, price: '', image: '' });
     const [sellQty, setSellQty] = useState(1);
+    
+    // فورم المبيعات المحدث ليشمل التوصيل
+    const [sellForm, setSellForm] = useState({ type: 'direct', customerName: '', phone: '', address: '' });
 
     const filteredGoods = finishedGoods.filter(g => g.name.includes(searchTerm) || (g.code && g.code.includes(searchTerm)));
 
@@ -861,30 +862,50 @@ export default function App() {
     const handleSell = async (e) => {
       e.preventDefault();
       if (sellQty > selectedItem.quantity) { alert("الكمية المطلوبة أكبر من المتوفر!"); return; }
+      
       const newQty = selectedItem.quantity - sellQty;
       const totalRevenue = sellQty * selectedItem.price;
       const now = new Date().toISOString();
 
+      // خصم من المخزن
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', selectedItem.id), { quantity: newQty });
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
-        category: 'revenue', type: 'income', amount: totalRevenue, description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now
-      });
-
-      const receiptData = {
-        id: 'DIR-' + Date.now().toString().slice(-6),
-        customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد',
+      
+      const baseOrderData = {
         cakeCategory: selectedItem.name, cakeSize: 'جاهز من المخزن', quantity: sellQty,
-        price: totalRevenue, status: 'completed', createdAt: now, completedAt: now, orderNumber: Date.now() % 10000,
-        images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, printType: 'receipt'
+        price: totalRevenue, createdAt: now, orderNumber: Date.now() % 10000,
+        images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, orderSource: 'ready_made'
       };
 
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
+      if (sellForm.type === 'direct') {
+        // تسليم مباشر: تسجيل الإيراد فوراً وتأكيد الطلب
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+          category: 'revenue', type: 'income', amount: totalRevenue, description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now
+        });
+
+        const receiptData = {
+          ...baseOrderData, id: 'DIR-' + Date.now().toString().slice(-6),
+          customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد',
+          status: 'completed', completedAt: now, printType: 'receipt'
+        };
+
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
+        showNotification("تم إخراج المنتج بنجاح.");
+        setPrintData(receiptData); 
+      } else {
+        // إرسال مع التوصيل: لا نسجل الإيراد، ونحوله للسائق
+        const deliveryOrderData = {
+          ...baseOrderData,
+          customerName: sellForm.customerName, phone: sellForm.phone, address: sellForm.address,
+          status: 'ready' // جاهز للشحن
+        };
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), deliveryOrderData);
+        showNotification("تم سحب المنتج وتحويله لقسم التوصيل بنجاح.");
+      }
 
       setSellModalOpen(false);
       setSelectedItem(null);
       setSellQty(1);
-      showNotification("تم إخراج المنتج بنجاح.");
-      setPrintData(receiptData); 
+      setSellForm({ type: 'direct', customerName: '', phone: '', address: '' });
     };
 
     return (
@@ -905,7 +926,7 @@ export default function App() {
                 <div className="flex justify-between items-start mb-2"><h3 className="font-bold text-gray-800 line-clamp-1" title={item.name}>{item.name}</h3><span className="text-xs bg-gray-100 font-mono px-2 py-1 rounded text-gray-600">{item.code}</span></div>
                 <p className="text-green-700 font-bold text-lg mb-2">{Number(item.price).toLocaleString()} IQD</p>
                 <p className="text-sm text-gray-600 mb-4">الرصيد المتوفر: <span className={`font-bold ${item.quantity < 5 ? 'text-red-600' : 'text-gray-900'}`}>{item.quantity}</span> قطعة</p>
-                <button onClick={() => {setSelectedItem(item); setSellQty(1); setSellModalOpen(true);}} disabled={item.quantity === 0} className="mt-auto w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white py-2 rounded-lg text-sm font-bold transition-colors flex justify-center items-center gap-2"><Printer size={16} /> {item.quantity === 0 ? 'نفذت الكمية' : 'إصدار فاتورة بيع'}</button>
+                <button onClick={() => {setSelectedItem(item); setSellQty(1); setSellForm({ type: 'direct', customerName: '', phone: '', address: '' }); setSellModalOpen(true);}} disabled={item.quantity === 0} className="mt-auto w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white py-2 rounded-lg text-sm font-bold transition-colors flex justify-center items-center gap-2"><Tag size={16} /> {item.quantity === 0 ? 'نفذت الكمية' : 'إصدار أو تحويل'}</button>
               </div>
             </div>
           ))}
@@ -926,18 +947,42 @@ export default function App() {
         </Modal>
 
         {selectedItem && (
-          <Modal isOpen={isSellModalOpen} onClose={() => setSellModalOpen(false)} title="إصدار فاتورة بيع مباشر">
+          <Modal isOpen={isSellModalOpen} onClose={() => setSellModalOpen(false)} title="إخراج من المخزن التام">
             <form onSubmit={handleSell} className="space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg flex items-center gap-4 mb-4 border">
+              <div className="bg-gray-50 p-4 rounded-lg flex items-center gap-4 border">
                 {selectedItem.image && <img src={selectedItem.image} className="w-16 h-16 rounded-md object-cover" alt="item"/>}
                 <div><h4 className="font-bold text-gray-800">{selectedItem.name}</h4><p className="text-sm text-gray-600">متوفر: {selectedItem.quantity} قطعة</p></div>
               </div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المراد بيعها</label><input type="number" required min="1" max={selectedItem.quantity} value={sellQty} onChange={e => setSellQty(Number(e.target.value))} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-lg font-bold" /></div>
-              <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                <p className="text-sm text-green-800 font-medium">الإجمالي المستحق:</p>
-                <p className="text-2xl font-bold text-green-900">{(sellQty * selectedItem.price).toLocaleString()} IQD</p>
+
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex flex-col gap-2">
+                 <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-blue-900">
+                   <input type="radio" name="sellType" value="direct" checked={sellForm.type === 'direct'} onChange={e => setSellForm({...sellForm, type: e.target.value})} className="w-4 h-4 text-blue-600 focus:ring-blue-500" />
+                   تسليم فوري (مباشر للزبون وتأكيد الإيراد)
+                 </label>
+                 <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-purple-900">
+                   <input type="radio" name="sellType" value="delivery" checked={sellForm.type === 'delivery'} onChange={e => setSellForm({...sellForm, type: e.target.value})} className="w-4 h-4 text-purple-600 focus:ring-purple-500" />
+                   إرسال مع مندوب التوصيل (يُرسل لقسم التوصيل)
+                 </label>
               </div>
-              <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2"><Printer size={18}/> تأكيد وطباعة الوصل</button>
+
+              {sellForm.type === 'delivery' && (
+                <div className="space-y-3 bg-purple-50 p-3 rounded-lg border border-purple-100">
+                  <input type="text" required placeholder="اسم العميل" value={sellForm.customerName} onChange={e => setSellForm({...sellForm, customerName: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none bg-white" />
+                  <input type="text" required placeholder="رقم الهاتف" value={sellForm.phone} onChange={e => setSellForm({...sellForm, phone: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none dir-ltr text-right bg-white" />
+                  <textarea required placeholder="عنوان التوصيل الدقيق" value={sellForm.address} onChange={e => setSellForm({...sellForm, address: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none bg-white" rows="2"></textarea>
+                </div>
+              )}
+
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المراد سحبها</label><input type="number" required min="1" max={selectedItem.quantity} value={sellQty} onChange={e => setSellQty(Number(e.target.value))} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" /></div>
+              
+              <div className={`${sellForm.type === 'direct' ? 'bg-green-50 border-green-200 text-green-900' : 'bg-gray-50 border-gray-200 text-gray-800'} p-4 rounded-lg border`}>
+                <p className="text-sm font-medium mb-1">الإجمالي المستحق:</p>
+                <p className="text-2xl font-bold">{(sellQty * selectedItem.price).toLocaleString()} IQD</p>
+              </div>
+
+              <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
+                 {sellForm.type === 'direct' ? <><Printer size={18}/> تأكيد وطباعة الوصل</> : <><Truck size={18}/> تحويل إلى قسم التوصيل</>}
+              </button>
             </form>
           </Modal>
         )}
