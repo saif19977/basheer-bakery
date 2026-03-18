@@ -166,7 +166,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [zoomedImage, setZoomedImage] = useState(null); // لعرض الصور المكبرة
+  const [zoomedImage, setZoomedImage] = useState(null);
   
   const [profiles, setProfiles] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -393,7 +393,7 @@ export default function App() {
              newItems[index].cakeCategory = fgItem.name;
              newItems[index].cakeSize = 'جاهز من المخزن';
              newItems[index].price = fgItem.price * newItems[index].quantity;
-             if(fgItem.image) newItems[index].itemImage = fgItem.image; // سحب صورة المنتج التام
+             if(fgItem.image) newItems[index].itemImage = fgItem.image;
           }
        }
        if (field === 'quantity' && newItems[index].orderSource === 'ready_made' && newItems[index].selectedFG) {
@@ -469,7 +469,6 @@ export default function App() {
         <Table headers={['الصور', 'رقم الطلب', 'العميل', 'الأصناف', 'الموعد', 'الحالة', 'إجراء']}>
           {filteredOrders.map(o => {
             const items = getOrderItems(o);
-            // عرض صورة أول صنف، أو الصورة النهائية
             const displayImg = o.finalImage ? o.finalImage : (items[0]?.itemImage || (o.images && o.images[0]));
             return (
             <tr key={o.id} className="hover:bg-gray-50 transition-colors">
@@ -518,8 +517,6 @@ export default function App() {
 
         <Modal isOpen={isModalOpen} onClose={() => setModalOpen(false)} title={editingId ? "تعديل الطلب" : "إنشاء طلب جديد"} maxWidth="max-w-4xl">
           <form onSubmit={handleSubmit} className="space-y-6">
-            
-            {/* Customer Info */}
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                <h3 className="font-bold text-gray-800 mb-3 border-b pb-2">بيانات العميل والتوصيل</h3>
                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
@@ -531,7 +528,6 @@ export default function App() {
                <div><label className="block text-xs font-bold text-gray-700 mb-1">عنوان التوصيل الدقيق</label><input type="text" required value={form.address} onChange={e => setForm({...form, address: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
             </div>
 
-            {/* Items List */}
             <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200">
                <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold text-amber-900">الأصناف المطلوبة</h3>
@@ -878,7 +874,7 @@ export default function App() {
   const FinishedGoodsView = () => {
     const [isAddModalOpen, setAddModalOpen] = useState(false);
     const [isSellModalOpen, setSellModalOpen] = useState(false);
-    const [addStockModal, setAddStockModal] = useState(null); // لإضافة رصيد لمنتج موجود
+    const [addStockModal, setAddStockModal] = useState(null);
     const [deleteFGModal, setDeleteFGModal] = useState(null);
     const [selectedItem, setSelectedItem] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -1182,9 +1178,16 @@ export default function App() {
 
   const SalesView = () => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
     const completed = orders.filter(o => {
       const searchNum = formatOrderNum(o);
-      return o.status === 'completed' && (o.customerName?.includes(searchTerm) || searchNum.includes(searchTerm));
+      const matchSearch = (o.customerName?.includes(searchTerm) || searchNum.includes(searchTerm));
+      if (o.status !== 'completed' || !matchSearch) return false;
+      if (startDate && new Date(o.completedAt) < new Date(startDate)) return false;
+      if (endDate && new Date(o.completedAt) > new Date(endDate + 'T23:59:59')) return false;
+      return true;
     });
     
     const monthlyData = {};
@@ -1201,15 +1204,23 @@ export default function App() {
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <h2 className="text-2xl font-bold text-gray-800">سجل المبيعات</h2>
-          <div className="relative w-full md:w-64"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم أو الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-48"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم أو الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm" /></div>
+            <div className="flex items-center gap-2">
+               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="من تاريخ" />
+               <span className="text-gray-400">-</span>
+               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="إلى تاريخ" />
+            </div>
+            <button onClick={() => setPrintData({ printType: 'sales_report', data: completed, startDate, endDate, totalSales })} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors whitespace-nowrap"><Printer size={18} /> طباعة التقرير</button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <StatCard title="الطلبات المكتملة" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
-          <StatCard title="إجمالي الإيرادات" value={`${totalSales.toLocaleString()} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
+          <StatCard title="الطلبات المكتملة ضمن البحث" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
+          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${totalSales.toLocaleString()} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
         </div>
         
-        <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية</h3>
+        <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية ضمن البحث</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
           {Object.entries(monthlyData).sort().reverse().map(([month, data]) => (
             <div key={month} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
@@ -1234,6 +1245,7 @@ export default function App() {
                <td className="p-4 font-semibold text-green-700">+ {Number(o.price).toLocaleString()} IQD</td>
              </tr>
           )})}
+          {completed.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">لا توجد مبيعات مطابقة لبحثك.</td></tr>}
         </Table>
       </div>
     );
@@ -1304,16 +1316,23 @@ export default function App() {
   const FinanceView = () => {
     const [isModalOpen, setModalOpen] = useState(false);
     const [filterCategory, setFilterCategory] = useState('all');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
     const [form, setForm] = useState({ type: 'expense', category: 'daily_ops', amount: '', description: '' });
 
     const categories = { revenue: 'إيرادات المبيعات', other_income: 'إيرادات أخرى', rent: 'إيجار', salaries: 'رواتب', internet: 'إنترنت', bonuses: 'مكافآت', maintenance: 'صيانة عامة', marketing: 'تسويق', personal: 'مسحوبات شخصية', daily_ops: 'مصاريف تشغيلية يومية', inventory_purchase: 'مواد مضافة (مشتريات)' };
     const currentInventoryValue = inventory.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.price || 0)), 0);
-    const filteredTransactions = transactions.filter(t => filterCategory === 'all' || t.category === filterCategory);
-    const calcTotal = (condition) => transactions.filter(condition).reduce((sum, t) => sum + Number(t.amount), 0);
     
-    const totalIncome = calcTotal(t => t.type === 'income');
-    const totalExpense = calcTotal(t => t.type === 'expense');
-    const netProfit = totalIncome - totalExpense;
+    const fullyFilteredTransactions = transactions.filter(t => {
+       if (filterCategory !== 'all' && t.category !== filterCategory) return false;
+       if (startDate && new Date(t.date) < new Date(startDate)) return false;
+       if (endDate && new Date(t.date) > new Date(endDate + 'T23:59:59')) return false;
+       return true;
+    });
+
+    const filteredIncome = fullyFilteredTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0);
+    const filteredExpense = fullyFilteredTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0);
+    const filteredNetProfit = filteredIncome - filteredExpense;
 
     const handleSubmit = async (e) => {
       e.preventDefault();
@@ -1330,23 +1349,33 @@ export default function App() {
         </div>
 
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200">
-           <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2"><FileText size={20} className="text-amber-600"/> تقرير الملخص المالي</h3>
+           <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2"><FileText size={20} className="text-amber-600"/> تقرير الملخص المالي (ضمن البحث المختار)</h3>
            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-4 bg-blue-50 rounded-lg border border-blue-100"><p className="text-xs text-blue-800 font-medium">قيمة المخزون الخام</p><p className="text-lg md:text-xl font-bold text-blue-900 mt-1">{currentInventoryValue.toLocaleString()} IQD</p></div>
-              <div className="p-4 bg-green-50 rounded-lg border border-green-100"><p className="text-xs text-green-800 font-medium">إجمالي الإيرادات</p><p className="text-lg md:text-xl font-bold text-green-900 mt-1">{totalIncome.toLocaleString()} IQD</p></div>
-              <div className="p-4 bg-red-50 rounded-lg border border-red-100"><p className="text-xs text-red-800 font-medium">إجمالي المصروفات</p><p className="text-lg md:text-xl font-bold text-red-900 mt-1">{totalExpense.toLocaleString()} IQD</p></div>
-              <div className={`p-4 rounded-lg border ${netProfit >= 0 ? 'bg-amber-50 border-amber-100' : 'bg-gray-100 border-gray-200'}`}><p className={`text-xs font-bold ${netProfit >= 0 ? 'text-amber-800' : 'text-gray-600'}`}>صافي الأرباح</p><p className={`text-lg md:text-xl font-bold mt-1 ${netProfit >= 0 ? 'text-amber-900' : 'text-gray-800'}`}>{netProfit.toLocaleString()} IQD</p></div>
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-100"><p className="text-xs text-blue-800 font-medium">قيمة المخزون الخام العام</p><p className="text-lg md:text-xl font-bold text-blue-900 mt-1">{currentInventoryValue.toLocaleString()} IQD</p></div>
+              <div className="p-4 bg-green-50 rounded-lg border border-green-100"><p className="text-xs text-green-800 font-medium">الإيرادات ضمن البحث</p><p className="text-lg md:text-xl font-bold text-green-900 mt-1">{filteredIncome.toLocaleString()} IQD</p></div>
+              <div className="p-4 bg-red-50 rounded-lg border border-red-100"><p className="text-xs text-red-800 font-medium">المصروفات ضمن البحث</p><p className="text-lg md:text-xl font-bold text-red-900 mt-1">{filteredExpense.toLocaleString()} IQD</p></div>
+              <div className={`p-4 rounded-lg border ${filteredNetProfit >= 0 ? 'bg-amber-50 border-amber-100' : 'bg-gray-100 border-gray-200'}`}><p className={`text-xs font-bold ${filteredNetProfit >= 0 ? 'text-amber-800' : 'text-gray-600'}`}>صافي الأرباح (للبحث)</p><p className={`text-lg md:text-xl font-bold mt-1 ${filteredNetProfit >= 0 ? 'text-amber-900' : 'text-gray-800'}`}>{filteredNetProfit.toLocaleString()} IQD</p></div>
            </div>
         </div>
 
         <div className="flex flex-col md:flex-row justify-between items-center bg-gray-100 p-3 rounded-lg border gap-4 no-print">
-           <span className="font-medium text-gray-700">تصفية السجل اليومي:</span>
-           <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="p-2 border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-amber-500 w-full md:w-auto bg-white"><option value="all">عرض كل المعاملات</option>{Object.entries(categories).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+           <span className="font-bold text-gray-700">أدوات الفلترة والطباعة:</span>
+           <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+             <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="p-2 border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-amber-500 bg-white text-sm">
+               <option value="all">كل الفئات</option>{Object.entries(categories).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+             </select>
+             <div className="flex items-center gap-2">
+               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="من تاريخ" />
+               <span className="text-gray-400">-</span>
+               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="إلى تاريخ" />
+             </div>
+             <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { filteredIncome, filteredExpense, filteredNetProfit } })} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors whitespace-nowrap"><Printer size={18} /> طباعة التقرير</button>
+           </div>
         </div>
 
         <div className="print-section">
           <Table headers={['التاريخ', 'النوع', 'الفئة', 'الوصف', 'المبلغ']}>
-            {filteredTransactions.map(t => (
+            {fullyFilteredTransactions.map(t => (
               <tr key={t.id} className="hover:bg-gray-50">
                 <td className="p-4 text-sm whitespace-nowrap">{formatDate(t.date)}</td>
                 <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${t.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{t.type === 'income' ? 'إيراد' : 'مصروف'}</span></td>
@@ -1355,7 +1384,7 @@ export default function App() {
                 <td className={`p-4 font-bold dir-ltr text-right ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'income' ? '+' : '-'} {Number(t.amount).toLocaleString()} IQD</td>
               </tr>
             ))}
-            {filteredTransactions.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">لا توجد معاملات مطابقة للفلتر.</td></tr>}
+            {fullyFilteredTransactions.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">لا توجد معاملات مطابقة للفلتر.</td></tr>}
           </Table>
         </div>
 
@@ -1482,6 +1511,8 @@ export default function App() {
   }
 
   const isProductionPrint = printData?.printType === 'production';
+  const isSalesReport = printData?.printType === 'sales_report';
+  const isFinanceReport = printData?.printType === 'finance_report';
 
   return (
     <>
@@ -1513,7 +1544,7 @@ export default function App() {
         ))}
       </div>
 
-      {printData && (
+      {printData && !isSalesReport && !isFinanceReport && (
         <div className="print-section hidden print:block text-right dir-rtl font-sans p-8 mx-auto max-w-2xl bg-white border-2 border-dashed border-gray-300">
           <div className="text-center mb-8 border-b-2 border-gray-800 pb-6">
             <h1 className="text-4xl font-serif text-slate-800 font-bold mb-1">BASHEER ALSHAKARCHY</h1>
@@ -1576,6 +1607,72 @@ export default function App() {
         </div>
       )}
 
+      {/* تقرير المبيعات المطبوع */}
+      {isSalesReport && (
+        <div className="print-section hidden print:block text-right dir-rtl font-sans p-8 mx-auto w-full bg-white">
+          <div className="text-center mb-6 border-b-2 border-gray-800 pb-4">
+            <h1 className="text-3xl font-serif text-slate-800 font-bold mb-1">BASHEER ALSHAKARCHY</h1>
+            <p className="text-sm font-semibold tracking-widest text-slate-500 uppercase">Sweets & Cake</p>
+            <p className="mt-4 text-xl font-bold">تقرير المبيعات الشامل</p>
+            <p className="text-sm text-gray-600 mt-2">
+               الفترة: {printData.startDate ? new Date(printData.startDate).toLocaleDateString('ar-IQ') : 'البداية'} - {printData.endDate ? new Date(printData.endDate).toLocaleDateString('ar-IQ') : 'حتى الآن'}
+            </p>
+          </div>
+          <div className="flex gap-4 mb-6">
+             <div className="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-sm text-green-800">إجمالي المبيعات المحققة</p><p className="font-bold text-2xl text-green-900">{printData.totalSales.toLocaleString()} IQD</p></div>
+             <div className="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-sm text-blue-800">عدد الطلبات المكتملة</p><p className="font-bold text-2xl text-blue-900">{printData.count} طلب</p></div>
+          </div>
+          <table className="w-full text-right border-collapse border border-gray-300">
+             <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">تاريخ الاكتمال</th><th className="p-3 border border-gray-300 text-sm">العميل</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
+             <tbody>
+                {printData.data.map(o => (
+                   <tr key={o.id}>
+                      <td className="p-3 border border-gray-300 font-mono text-xs">#{formatOrderNum(o)}</td>
+                      <td className="p-3 border border-gray-300 text-xs">{formatDate(o.completedAt)}</td>
+                      <td className="p-3 border border-gray-300 text-sm">{o.customerName}</td>
+                      <td className="p-3 border border-gray-300 text-xs">{getOrderItems(o).map((i, idx) => <div key={idx}>{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</div>)}</td>
+                      <td className="p-3 border border-gray-300 font-bold">{Number(o.price).toLocaleString()}</td>
+                   </tr>
+                ))}
+             </tbody>
+          </table>
+          <p className="text-center text-xs text-gray-500 mt-6">تاريخ طباعة التقرير: {new Date().toLocaleString('ar-IQ')}</p>
+        </div>
+      )}
+
+      {/* التقرير المالي المطبوع */}
+      {isFinanceReport && (
+        <div className="print-section hidden print:block text-right dir-rtl font-sans p-8 mx-auto w-full bg-white">
+          <div className="text-center mb-6 border-b-2 border-gray-800 pb-4">
+            <h1 className="text-3xl font-serif text-slate-800 font-bold mb-1">BASHEER ALSHAKARCHY</h1>
+            <p className="text-sm font-semibold tracking-widest text-slate-500 uppercase">Sweets & Cake</p>
+            <p className="mt-4 text-xl font-bold">التقرير المالي وحركة الصندوق</p>
+            <p className="text-sm text-gray-600 mt-2">
+               الفترة: {printData.startDate ? new Date(printData.startDate).toLocaleDateString('ar-IQ') : 'البداية'} - {printData.endDate ? new Date(printData.endDate).toLocaleDateString('ar-IQ') : 'حتى الآن'}
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-4 mb-6">
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">إجمالي الإيرادات</p><p className="font-bold text-xl text-green-900">{printData.totals.filteredIncome.toLocaleString()} IQD</p></div>
+             <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">إجمالي المصروفات</p><p className="font-bold text-xl text-red-900">{printData.totals.filteredExpense.toLocaleString()} IQD</p></div>
+             <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 text-center"><p className="text-xs text-amber-800">الصافي</p><p className="font-bold text-xl text-amber-900">{printData.totals.filteredNetProfit.toLocaleString()} IQD</p></div>
+          </div>
+          <table className="w-full text-right border-collapse border border-gray-300">
+             <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">النوع</th><th className="p-3 border border-gray-300 text-sm">البيان (الوصف)</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
+             <tbody>
+                {printData.data.map(t => (
+                   <tr key={t.id}>
+                      <td className="p-3 border border-gray-300 text-xs whitespace-nowrap">{formatDate(t.date)}</td>
+                      <td className="p-3 border border-gray-300 text-xs font-bold">{t.type === 'income' ? 'إيراد (+)' : 'مصروف (-)'}</td>
+                      <td className="p-3 border border-gray-300 text-sm">{t.description}</td>
+                      <td className="p-3 border border-gray-300 font-bold dir-ltr text-right">{t.type === 'income' ? '+' : '-'} {Number(t.amount).toLocaleString()}</td>
+                   </tr>
+                ))}
+             </tbody>
+          </table>
+          <p className="text-center text-xs text-gray-500 mt-6">تاريخ طباعة التقرير: {new Date().toLocaleString('ar-IQ')}</p>
+        </div>
+      )}
+
       <div className={`flex h-screen bg-gray-50 text-gray-900 overflow-hidden font-sans ${printData ? 'no-print' : ''}`} dir="rtl">
         {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
         <aside className={`fixed lg:static inset-y-0 right-0 transform ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 transition-transform duration-300 ease-in-out w-64 bg-gray-900 text-white flex flex-col shadow-2xl lg:shadow-xl z-30`}>
@@ -1624,7 +1721,7 @@ export default function App() {
                <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-800 p-4 md:p-5 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-10">
                  <div className="flex items-center gap-3">
                    <Printer size={24} className="text-blue-600 flex-shrink-0" />
-                   <p className="font-medium text-sm md:text-lg">وضع الطباعة {isProductionPrint ? '(تذكرة معمل بدون سعر)' : 'للفاتورة الكاملة'} <span className="font-mono bg-blue-100 px-2 rounded">#{formatOrderNum(printData)}</span></p>
+                   <p className="font-medium text-sm md:text-lg">وضع الطباعة {isProductionPrint ? '(تذكرة معمل بدون سعر)' : isSalesReport || isFinanceReport ? '(تقرير شامل)' : 'للفاتورة الكاملة'}</p>
                  </div>
                  <div className="flex gap-2 w-full md:w-auto">
                    <button onClick={() => window.print()} className="flex-1 md:flex-none bg-blue-600 text-white px-5 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"><Printer size={18} /> بدء الطباعة</button>
