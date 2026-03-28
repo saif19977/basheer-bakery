@@ -36,7 +36,11 @@ const CAKE_CATEGORIES = {
   'أخرى (إدخال يدوي)': []
 };
 
-// --- المكونات المشتركة ---
+// --- المكونات المشتركة ودوال المساعدة ---
+const formatMoney = (amount) => {
+  return Math.round(Number(amount || 0)).toLocaleString('en-US');
+};
+
 const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
   if (!isOpen) return null;
   return (
@@ -489,7 +493,7 @@ export default function App() {
                        {i.orderSource === 'ready_made' && <span className="text-[9px] bg-green-100 text-green-700 px-1 rounded mx-1">مخزن</span>}
                     </div>
                  ))}
-                 <div className="font-bold text-amber-600 mt-1 border-t pt-1 border-gray-100">الإجمالي: {Number(o.price).toLocaleString()} IQD</div>
+                 <div className="font-bold text-amber-600 mt-1 border-t pt-1 border-gray-100">الإجمالي: {formatMoney(o.price)} IQD</div>
               </td>
               <td className="p-4"><Countdown deliveryDate={o.deliveryDate} /></td>
               <td className="p-4"><StatusBadge status={o.status} /></td>
@@ -552,7 +556,7 @@ export default function App() {
                                    <label className="block text-xs font-bold text-gray-700 mb-1">اختر من المخزن التام</label>
                                    <select required={!editingId} value={item.selectedFG} onChange={e => handleItemChange(index, 'selectedFG', e.target.value)} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-green-500">
                                      <option value="">-- اختر منتجاً --</option>
-                                     {finishedGoods.map(g => <option key={g.id} value={g.id} disabled={g.quantity === 0}>{g.name} (متوفر: {g.quantity}) - {g.price} IQD</option>)}
+                                     {finishedGoods.map(g => <option key={g.id} value={g.id} disabled={g.quantity === 0}>{g.name} (متوفر: {g.quantity}) - {formatMoney(g.price)} IQD</option>)}
                                    </select>
                                  </div>
                               ) : (
@@ -604,7 +608,7 @@ export default function App() {
                <div className="flex justify-between items-center mt-6 bg-white p-4 rounded-xl border-2 border-amber-500 shadow-md">
                   <span className="font-bold text-amber-900 text-lg">المبلغ الإجمالي الكلي للطلب:</span>
                   <div className="flex items-center gap-2">
-                     <input type="number" required min="0" value={form.totalPrice} onChange={e => setForm({...form, totalPrice: e.target.value})} className="w-32 md:w-48 p-2 border-b-2 border-amber-500 text-center font-bold text-2xl text-amber-900 outline-none bg-transparent" />
+                     <input type="number" required min="0" step="1" value={form.totalPrice} onChange={e => setForm({...form, totalPrice: e.target.value})} className="w-32 md:w-48 p-2 border-b-2 border-amber-500 text-center font-bold text-2xl text-amber-900 outline-none bg-transparent" />
                      <span className="font-bold text-amber-700">IQD</span>
                   </div>
                </div>
@@ -639,7 +643,7 @@ export default function App() {
                      <p className="font-bold text-gray-800 text-lg">{order.customerName}</p>
                      <p className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full inline-flex items-center gap-1"><Phone size={10}/> {order.contactMethod || 'مباشر'}</p>
                    </div>
-                   <span className="font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 text-lg">{Number(order.price).toLocaleString()} IQD</span>
+                   <span className="font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 text-lg">{formatMoney(order.price)} IQD</span>
                 </div>
                 <p className="text-sm text-gray-600 mb-2 dir-ltr text-right font-mono font-bold">{order.phone}</p>
                 <p className="text-sm text-gray-700 bg-white p-2 rounded border"><span className="font-bold">العنوان:</span> {order.address}</p>
@@ -734,7 +738,7 @@ export default function App() {
                <td className="p-4 dir-ltr text-right font-mono text-sm">{c.phone}</td>
                <td className="p-4 text-xs"><div className="flex gap-1 flex-wrap">{Array.from(c.methods).map(m => <span key={m} className="bg-gray-100 border px-2 py-0.5 rounded">{m}</span>)}</div></td>
                <td className="p-4 font-bold text-blue-600">{c.orderCount}</td>
-               <td className="p-4 font-bold text-green-700">{c.totalSpent.toLocaleString()} IQD</td>
+               <td className="p-4 font-bold text-green-700">{formatMoney(c.totalSpent)} IQD</td>
                <td className="p-4 text-sm text-gray-500">{formatDate(c.lastOrder)}</td>
                <td className="p-4 text-sm text-gray-600 truncate max-w-xs" title={c.address}>{c.address}</td>
              </tr>
@@ -995,7 +999,7 @@ export default function App() {
               {item.image ? <img src={item.image} alt={item.name} className="w-full h-40 object-cover cursor-pointer" onClick={()=>setZoomedImage(item.image)} /> : <div className="w-full h-40 bg-gray-100 flex items-center justify-center text-gray-400"><Box size={40}/></div>}
               <div className="p-4 flex-1 flex flex-col">
                 <div className="flex justify-between items-start mb-2"><h3 className="font-bold text-gray-800 line-clamp-1" title={item.name}>{item.name}</h3><span className="text-xs bg-gray-100 font-mono px-2 py-1 rounded text-gray-600 border">{item.code}</span></div>
-                <p className="text-green-700 font-bold text-lg mb-2">{Number(item.price).toLocaleString()} IQD</p>
+                <p className="text-green-700 font-bold text-lg mb-2">{formatMoney(item.price)} IQD</p>
                 <div className="bg-gray-50 rounded p-2 mb-4 border border-gray-100">
                    <p className="text-sm text-gray-600 flex justify-between items-center mb-1">الرصيد المتوفر: <span className={`font-bold text-lg ${item.quantity < 5 ? 'text-red-600' : 'text-blue-700'}`}>{item.quantity}</span></p>
                    <p className="text-[10px] text-gray-500 border-t pt-1 mt-1 border-gray-200">آخر إضافة: {formatDate(item.lastAddedAt || item.addedAt) || 'غير محدد'}</p>
@@ -1028,7 +1032,7 @@ export default function App() {
              </div>
              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">الكمية الجديدة المراد إضافتها للرصيد</label>
-                <input type="number" required min="1" value={addQty} onChange={e => setAddQty(Number(e.target.value))} className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" />
+                <input type="number" required min="1" step="1" value={addQty} onChange={e => setAddQty(Number(e.target.value))} className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" />
              </div>
              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg mt-2 transition-colors flex justify-center items-center gap-2"><Plus size={18}/> تحديث الرصيد</button>
           </form>
@@ -1039,7 +1043,7 @@ export default function App() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">اسم المنتج</label><input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none" /><p className="text-xs text-gray-500 mt-1">إذا كان الاسم موجوداً مسبقاً، سيتم تجميع الكمية كـ (رصيد تراكمي).</p></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">كود المنتج (اختياري)</label><input type="text" value={form.code} onChange={e => setForm({...form, code: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none dir-ltr text-right" /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المضافة</label><input type="number" required min="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المضافة</label><input type="number" required min="1" step="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
             </div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر البيع للقطعة (IQD)</label><input type="number" required min="0" step="1" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50" />{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
@@ -1068,11 +1072,11 @@ export default function App() {
                 </div>
               )}
 
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المراد سحبها</label><input type="number" required min="1" max={selectedItem.quantity} value={sellQty} onChange={e => setSellQty(Number(e.target.value))} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المراد سحبها</label><input type="number" required min="1" step="1" max={selectedItem.quantity} value={sellQty} onChange={e => setSellQty(Number(e.target.value))} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" /></div>
               
               <div className={`${sellForm.type === 'direct' ? 'bg-green-50 border-green-200 text-green-900' : 'bg-gray-50 border-gray-200 text-gray-800'} p-4 rounded-lg border`}>
                 <p className="text-sm font-medium mb-1">الإجمالي المستحق:</p>
-                <p className="text-2xl font-bold">{(sellQty * selectedItem.price).toLocaleString()} IQD</p>
+                <p className="text-2xl font-bold">{formatMoney(sellQty * selectedItem.price)} IQD</p>
               </div>
 
               <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
@@ -1217,7 +1221,7 @@ export default function App() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <StatCard title="الطلبات المكتملة ضمن البحث" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
-          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${totalSales.toLocaleString()} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
+          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${formatMoney(totalSales)} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
         </div>
         
         <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية ضمن البحث</h3>
@@ -1227,7 +1231,7 @@ export default function App() {
               <div className="absolute top-0 right-0 w-1 h-full bg-amber-500"></div>
               <h4 className="font-bold text-gray-700 mb-2 dir-ltr text-right">{month}</h4>
               <p className="text-sm text-gray-500 mb-1">الطلبات: <span className="font-bold text-gray-700">{data.count}</span></p>
-              <p className="text-xl font-bold text-green-600 mt-2">{data.revenue.toLocaleString()} IQD</p>
+              <p className="text-xl font-bold text-green-600 mt-2">{formatMoney(data.revenue)} IQD</p>
             </div>
           ))}
         </div>
@@ -1242,7 +1246,7 @@ export default function App() {
                <td className="p-4 text-sm">{formatDate(o.completedAt)}</td>
                <td className="p-4 font-medium">{o.customerName}</td>
                <td className="p-4 text-sm">{items.map((i, idx) => <div key={idx}>{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</div>)}</td>
-               <td className="p-4 font-semibold text-green-700">+ {Number(o.price).toLocaleString()} IQD</td>
+               <td className="p-4 font-semibold text-green-700">+ {formatMoney(o.price)} IQD</td>
              </tr>
           )})}
           {completed.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">لا توجد مبيعات مطابقة لبحثك.</td></tr>}
@@ -1281,8 +1285,8 @@ export default function App() {
               <td className="p-4 font-semibold text-gray-800">{item.itemName}</td>
               <td className="p-4 text-sm text-gray-600">{item.type}</td>
               <td className="p-4"><span className={`px-3 py-1 rounded-full text-sm font-bold ${item.quantity < 10 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.quantity} {item.unit}</span></td>
-              <td className="p-4 text-sm font-medium text-gray-700">{Number(item.price || 0).toLocaleString()} IQD</td>
-              <td className="p-4 font-bold text-amber-700 bg-amber-50/50">{(Number(item.quantity) * Number(item.price || 0)).toLocaleString()} IQD</td>
+              <td className="p-4 text-sm font-medium text-gray-700">{formatMoney(item.price)} IQD</td>
+              <td className="p-4 font-bold text-amber-700 bg-amber-50/50">{formatMoney(item.quantity * item.price)} IQD</td>
               <td className="p-4 flex space-x-2 space-x-reverse">
                 <button onClick={() => handleAdjustQty(item.id, item.quantity, 1)} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded font-bold">+</button>
                 <button onClick={() => handleAdjustQty(item.id, item.quantity, -1)} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded font-bold">-</button>
@@ -1302,7 +1306,7 @@ export default function App() {
               </select>
             </div>
             <div className="grid grid-cols-3 gap-2 md:gap-4">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية</label><input type="number" required min="0" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية</label><input type="number" required min="0" step="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر الوحدة (IQD)</label><input type="number" step="1" min="0" required value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">الوحدة</label><select value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none"><option value="كجم">كجم</option><option value="جرام">جرام</option><option value="قطعة">قطعة</option><option value="لتر">لتر</option></select></div>
             </div>
@@ -1320,7 +1324,7 @@ export default function App() {
     const [endDate, setEndDate] = useState('');
     const [form, setForm] = useState({ type: 'expense', category: 'daily_ops', amount: '', description: '' });
 
-    const categories = { revenue: 'إيرادات المبيعات', other_income: 'إيرادات أخرى', rent: 'إيجار', salaries: 'رواتب', internet: 'إنترنت', bonuses: 'مكافآت', maintenance: 'صيانة عامة', marketing: 'تسويق', personal: 'مسحوبات شخصية', daily_ops: 'مصاريف تشغيلية يومية', inventory_purchase: 'مواد مضافة (مشتريات)' };
+    const categories = { revenue: 'إيرادات المبيعات', other_income: 'إيرادات أخرى', rent: 'إيجار', salaries: 'رواتب', internet: 'إنترنت', bonuses: 'مكافآت', maintenance: 'صيانة عامة', marketing: 'تسويق', personal: 'مسحوبات شخصية', daily_ops: 'مصاريف تشغيلية يومية', inventory_purchase: 'مواد مضافة (مشتريات)', other_expense: 'مصروفات أخرى (أخرى)' };
     const currentInventoryValue = inventory.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.price || 0)), 0);
     
     const fullyFilteredTransactions = transactions.filter(t => {
@@ -1351,10 +1355,10 @@ export default function App() {
         <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200">
            <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2"><FileText size={20} className="text-amber-600"/> تقرير الملخص المالي (ضمن البحث المختار)</h3>
            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-4 bg-blue-50 rounded-lg border border-blue-100"><p className="text-xs text-blue-800 font-medium">قيمة المخزون الخام العام</p><p className="text-lg md:text-xl font-bold text-blue-900 mt-1">{currentInventoryValue.toLocaleString()} IQD</p></div>
-              <div className="p-4 bg-green-50 rounded-lg border border-green-100"><p className="text-xs text-green-800 font-medium">الإيرادات ضمن البحث</p><p className="text-lg md:text-xl font-bold text-green-900 mt-1">{filteredIncome.toLocaleString()} IQD</p></div>
-              <div className="p-4 bg-red-50 rounded-lg border border-red-100"><p className="text-xs text-red-800 font-medium">المصروفات ضمن البحث</p><p className="text-lg md:text-xl font-bold text-red-900 mt-1">{filteredExpense.toLocaleString()} IQD</p></div>
-              <div className={`p-4 rounded-lg border ${filteredNetProfit >= 0 ? 'bg-amber-50 border-amber-100' : 'bg-gray-100 border-gray-200'}`}><p className={`text-xs font-bold ${filteredNetProfit >= 0 ? 'text-amber-800' : 'text-gray-600'}`}>صافي الأرباح (للبحث)</p><p className={`text-lg md:text-xl font-bold mt-1 ${filteredNetProfit >= 0 ? 'text-amber-900' : 'text-gray-800'}`}>{filteredNetProfit.toLocaleString()} IQD</p></div>
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-100"><p className="text-xs text-blue-800 font-medium">قيمة المخزون الخام العام</p><p className="text-lg md:text-xl font-bold text-blue-900 mt-1">{formatMoney(currentInventoryValue)} IQD</p></div>
+              <div className="p-4 bg-green-50 rounded-lg border border-green-100"><p className="text-xs text-green-800 font-medium">الإيرادات ضمن البحث</p><p className="text-lg md:text-xl font-bold text-green-900 mt-1">{formatMoney(filteredIncome)} IQD</p></div>
+              <div className="p-4 bg-red-50 rounded-lg border border-red-100"><p className="text-xs text-red-800 font-medium">المصروفات ضمن البحث</p><p className="text-lg md:text-xl font-bold text-red-900 mt-1">{formatMoney(filteredExpense)} IQD</p></div>
+              <div className={`p-4 rounded-lg border ${filteredNetProfit >= 0 ? 'bg-amber-50 border-amber-100' : 'bg-gray-100 border-gray-200'}`}><p className={`text-xs font-bold ${filteredNetProfit >= 0 ? 'text-amber-800' : 'text-gray-600'}`}>صافي الأرباح (للبحث)</p><p className={`text-lg md:text-xl font-bold mt-1 ${filteredNetProfit >= 0 ? 'text-amber-900' : 'text-gray-800'}`}>{formatMoney(filteredNetProfit)} IQD</p></div>
            </div>
         </div>
 
@@ -1381,7 +1385,7 @@ export default function App() {
                 <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${t.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{t.type === 'income' ? 'إيراد' : 'مصروف'}</span></td>
                 <td className="p-4 text-sm">{categories[t.category] || t.category}</td>
                 <td className="p-4 text-gray-800 max-w-xs truncate">{t.description}</td>
-                <td className={`p-4 font-bold dir-ltr text-right ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'income' ? '+' : '-'} {Number(t.amount).toLocaleString()} IQD</td>
+                <td className={`p-4 font-bold dir-ltr text-right ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'income' ? '+' : '-'} {formatMoney(t.amount)} IQD</td>
               </tr>
             ))}
             {fullyFilteredTransactions.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">لا توجد معاملات مطابقة للفلتر.</td></tr>}
@@ -1392,10 +1396,18 @@ export default function App() {
           <form onSubmit={handleSubmit} className="space-y-4">
              <div className="grid grid-cols-2 gap-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">النوع</label><select value={form.type} onChange={e => setForm({...form, type: e.target.value, category: e.target.value === 'income' ? 'other_income' : 'daily_ops'})} className="w-full p-2.5 border rounded-lg outline-none"><option value="expense">مصروفات (-)</option><option value="income">إيرادات (+)</option></select></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">التصنيف</label><select value={form.category} onChange={e => setForm({...form, category: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none">{form.type === 'income' ? (<><option value="revenue">مبيعات</option><option value="other_income">أخرى</option></>) : (<><option value="daily_ops">تشغيلية</option><option value="rent">إيجار</option><option value="salaries">رواتب</option><option value="personal">مسحوبات شخصية</option><option value="inventory_purchase">مشتريات مخزون</option></>)}</select></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">التصنيف</label>
+                <select value={form.category} onChange={e => setForm({...form, category: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none">
+                  {form.type === 'income' ? (
+                    <><option value="revenue">مبيعات</option><option value="other_income">أخرى</option></>
+                  ) : (
+                    <><option value="daily_ops">تشغيلية</option><option value="rent">إيجار</option><option value="salaries">رواتب</option><option value="personal">مسحوبات شخصية</option><option value="inventory_purchase">مشتريات مخزون</option><option value="other_expense">أخرى</option></>
+                  )}
+                </select>
+              </div>
             </div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">الوصف</label><input type="text" required value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (IQD)</label><input type="number" required min="0.01" step="1" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (IQD)</label><input type="number" required min="0" step="1" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
             <button type="submit" className="w-full bg-amber-600 text-white font-bold py-3 rounded-lg mt-4">حفظ المعاملة</button>
           </form>
         </Modal>
@@ -1594,7 +1606,7 @@ export default function App() {
             </div>
             
             {!isProductionPrint && (
-              <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl font-bold text-center"><strong>الإجمالي المستحق:</strong> {Number(printData.price).toLocaleString()} IQD</p>
+              <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl font-bold text-center"><strong>الإجمالي المستحق:</strong> {formatMoney(printData.price)} IQD</p>
             )}
 
             {printData.notes && <p className="p-4 border rounded-lg bg-yellow-50"><strong>ملاحظات عامة للتوصيل:</strong> {printData.notes}</p>}
@@ -1619,7 +1631,7 @@ export default function App() {
             </p>
           </div>
           <div className="flex gap-4 mb-6">
-             <div className="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-sm text-green-800">إجمالي المبيعات المحققة</p><p className="font-bold text-2xl text-green-900">{printData.totalSales.toLocaleString()} IQD</p></div>
+             <div className="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-sm text-green-800">إجمالي المبيعات المحققة</p><p className="font-bold text-2xl text-green-900">{formatMoney(printData.totalSales)} IQD</p></div>
              <div className="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-sm text-blue-800">عدد الطلبات المكتملة</p><p className="font-bold text-2xl text-blue-900">{printData.count} طلب</p></div>
           </div>
           <table className="w-full text-right border-collapse border border-gray-300">
@@ -1631,7 +1643,7 @@ export default function App() {
                       <td className="p-3 border border-gray-300 text-xs">{formatDate(o.completedAt)}</td>
                       <td className="p-3 border border-gray-300 text-sm">{o.customerName}</td>
                       <td className="p-3 border border-gray-300 text-xs">{getOrderItems(o).map((i, idx) => <div key={idx}>{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</div>)}</td>
-                      <td className="p-3 border border-gray-300 font-bold">{Number(o.price).toLocaleString()}</td>
+                      <td className="p-3 border border-gray-300 font-bold">{formatMoney(o.price)}</td>
                    </tr>
                 ))}
              </tbody>
@@ -1652,9 +1664,9 @@ export default function App() {
             </p>
           </div>
           <div className="grid grid-cols-3 gap-4 mb-6">
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">إجمالي الإيرادات</p><p className="font-bold text-xl text-green-900">{printData.totals.filteredIncome.toLocaleString()} IQD</p></div>
-             <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">إجمالي المصروفات</p><p className="font-bold text-xl text-red-900">{printData.totals.filteredExpense.toLocaleString()} IQD</p></div>
-             <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 text-center"><p className="text-xs text-amber-800">الصافي</p><p className="font-bold text-xl text-amber-900">{printData.totals.filteredNetProfit.toLocaleString()} IQD</p></div>
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">إجمالي الإيرادات</p><p className="font-bold text-xl text-green-900">{formatMoney(printData.totals.filteredIncome)} IQD</p></div>
+             <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">إجمالي المصروفات</p><p className="font-bold text-xl text-red-900">{formatMoney(printData.totals.filteredExpense)} IQD</p></div>
+             <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 text-center"><p className="text-xs text-amber-800">الصافي</p><p className="font-bold text-xl text-amber-900">{formatMoney(printData.totals.filteredNetProfit)} IQD</p></div>
           </div>
           <table className="w-full text-right border-collapse border border-gray-300">
              <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">النوع</th><th className="p-3 border border-gray-300 text-sm">البيان (الوصف)</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
@@ -1664,7 +1676,7 @@ export default function App() {
                       <td className="p-3 border border-gray-300 text-xs whitespace-nowrap">{formatDate(t.date)}</td>
                       <td className="p-3 border border-gray-300 text-xs font-bold">{t.type === 'income' ? 'إيراد (+)' : 'مصروف (-)'}</td>
                       <td className="p-3 border border-gray-300 text-sm">{t.description}</td>
-                      <td className="p-3 border border-gray-300 font-bold dir-ltr text-right">{t.type === 'income' ? '+' : '-'} {Number(t.amount).toLocaleString()}</td>
+                      <td className="p-3 border border-gray-300 font-bold dir-ltr text-right">{t.type === 'income' ? '+' : '-'} {formatMoney(t.amount)}</td>
                    </tr>
                 ))}
              </tbody>
