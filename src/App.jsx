@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { 
   Cake, LayoutDashboard, ShoppingCart, ChefHat, 
@@ -224,7 +224,7 @@ export default function App() {
 
   const myProfile = profiles.find(p => p.uid === user?.uid);
 
-  // التوجيه الذكي للصفحات حسب الصلاحيات (لحل مشكلة الشاشة الفارغة)
+  // التوجيه الذكي للصفحات حسب الصلاحيات
   useEffect(() => {
     if (myProfile) {
        const canAccessCurrent = hasAccess(activeTab);
@@ -336,7 +336,6 @@ export default function App() {
     const [editingId, setEditingId] = useState(null);
     const [cancelModal, setCancelModal] = useState(null);
     
-    // قائمة العملاء للتعبئة التلقائية
     const uniqueCustomers = React.useMemo(() => {
       const custMap = {};
       orders.forEach(o => {
@@ -1468,6 +1467,7 @@ export default function App() {
        e.preventDefault();
        let finalMaterials = [...recipeForm.materials];
        
+       // إضافة المادة الحالية إذا نسي المستخدم ضغط زر (+)
        if (selectedMat && selectedMatQty) {
            const invItem = inventory.find(i => i.id === selectedMat);
            if(invItem) {
@@ -1578,7 +1578,7 @@ export default function App() {
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recipes.map(r => {
                    let currentCost = 0;
-                   r.materials.forEach(m => {
+                   r.materials?.forEach(m => {
                       const inv = inventory.find(i => i.id === m.inventoryId);
                       if(inv) currentCost += (inv.price * m.qty);
                    });
@@ -1633,7 +1633,7 @@ export default function App() {
           </form>
         </Modal>
 
-        <Modal isOpen={isRecipeModalOpen} onClose={() => setRecipeModalOpen(false)} title="ضبط معادلة التصنيع والاستهلاك">
+        <Modal isOpen={isRecipeModalOpen} onClose={() => setRecipeModalOpen(false)} title={recipeForm.id ? "تعديل معادلة التصنيع" : "ضبط معادلة تصنيع جديدة"}>
           <form onSubmit={saveRecipe} className="space-y-4">
              <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">فئة الكيك</label><select value={recipeForm.cakeCategory} onChange={e => setRecipeForm({...recipeForm, cakeCategory: e.target.value, cakeSize: CAKE_CATEGORIES[e.target.value]?.[0]||''})} className="w-full p-2.5 border rounded-lg outline-none bg-white">{Object.keys(CAKE_CATEGORIES).filter(c=>c!=='أخرى (إدخال يدوي)').map(c => <option key={c} value={c}>{c}</option>)}</select></div>
@@ -1648,19 +1648,20 @@ export default function App() {
                       {inventory.map(i => <option key={i.id} value={i.id}>{i.itemName} ({i.unit})</option>)}
                    </select>
                    <input type="number" step="0.01" min="0" placeholder="الكمية" value={selectedMatQty} onChange={e => setSelectedMatQty(e.target.value)} className="w-24 p-2 border rounded-lg outline-none text-sm text-center" />
-                   <button type="button" onClick={addMaterialToRecipe} className="bg-blue-600 text-white px-3 rounded-lg"><Plus size={18}/></button>
+                   <button type="button" onClick={addMaterialToRecipe} className="bg-blue-600 text-white px-3 rounded-lg hover:bg-blue-700"><Plus size={18}/></button>
                 </div>
                 
                 <div className="space-y-2">
                    {recipeForm.materials.map((m, idx) => (
                       <div key={idx} className="flex justify-between bg-white p-2 rounded border text-sm items-center">
-                         <span>{m.itemName}</span>
+                         <span className="font-medium text-gray-800">{m.itemName}</span>
                          <div className="flex items-center gap-3">
-                            <span className="font-bold text-gray-700">{m.qty} {m.unit}</span>
-                            <button type="button" onClick={() => setRecipeForm({...recipeForm, materials: recipeForm.materials.filter((_, i) => i !== idx)})} className="text-red-500"><X size={16}/></button>
+                            <span className="font-bold text-blue-700">{m.qty} {m.unit}</span>
+                            <button type="button" onClick={() => setRecipeForm({...recipeForm, materials: recipeForm.materials.filter((_, i) => i !== idx)})} className="text-red-500 hover:bg-red-50 p-1 rounded"><X size={16}/></button>
                          </div>
                       </div>
                    ))}
+                   {recipeForm.materials.length === 0 && <p className="text-xs text-red-500 text-center py-2 font-bold border border-red-200 border-dashed rounded bg-red-50">لم يتم إضافة أي مواد بعد!</p>}
                 </div>
              </div>
              <button type="submit" className="w-full bg-slate-800 text-white font-bold py-3 rounded-lg mt-4 shadow-md">حفظ المعادلة</button>
@@ -1895,17 +1896,29 @@ export default function App() {
         const appName = "SecondaryAppForCreation";
         const secondaryApp = getApps().find(app => app.name === appName) || initializeApp(firebaseConfig, appName);
         const secondaryAuth = getAuth(secondaryApp);
+        
+        // منع تسجيل الدخول التلقائي لحساب الموظف الجديد في الجلسة الحالية
+        await setPersistence(secondaryAuth, inMemoryPersistence);
+        
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, systemEmail, newEmp.password);
         const newUid = userCredential.user.uid;
+        
         await signOut(secondaryAuth);
+        
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', newUid), {
           uid: newUid, name: newEmp.name, username: newEmp.username.trim().toLowerCase().replace(/\s+/g, ''),
           role: newEmp.role, createdAt: new Date().toISOString()
         });
+        
         setCreateModalOpen(false);
         setNewEmp({ name: '', username: '', password: '', role: 'staff' });
-        showNotification("تم إنشاء حساب الموظف بنجاح.");
-      } catch (err) { showNotification("❌ خطأ: " + err.message); }
+        showNotification("✅ تم إنشاء حساب الموظف بنجاح.");
+      } catch (err) { 
+        let msg = err.message;
+        if(err.code === 'auth/email-already-in-use') msg = 'اسم المستخدم (اليوزر) محجوز مسبقاً، اختر اسماً آخر.';
+        if(err.code === 'auth/weak-password') msg = 'كلمة المرور ضعيفة، يجب أن تكون 6 أحرف أو أرقام على الأقل.';
+        showNotification("❌ خطأ: " + msg); 
+      }
     };
 
     return (
@@ -1951,14 +1964,28 @@ export default function App() {
   if (authLoading) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري تحميل نظام المصنع...</h1></div></div>;
 
   if (!user) {
+    let clickCount = 0;
+    const handleLogoClick = () => {
+       clickCount++;
+       if(clickCount >= 5) {
+           setIsSetupMode(!isSetupMode);
+           clickCount = 0;
+       }
+    };
+
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
         <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
           <div className="flex flex-col items-center justify-center mx-auto mb-6 mt-2">
-             <div className="text-center"><span className="block text-3xl font-serif text-slate-800 tracking-wider font-bold mb-1">BASHEER</span><span className="block text-2xl font-serif text-slate-800 tracking-wider">ALSHAKARCHY</span><div className="w-full h-1 bg-amber-500 mt-2 mb-2 rounded"></div><span className="block text-xs text-slate-600 tracking-widest font-semibold uppercase">Sweets & Cake</span></div>
+             <div className="text-center select-none" onClick={handleLogoClick}>
+                 <span className="block text-3xl font-serif text-slate-800 tracking-wider font-bold mb-1 cursor-default">BASHEER</span>
+                 <span className="block text-2xl font-serif text-slate-800 tracking-wider cursor-default">ALSHAKARCHY</span>
+                 <div className="w-full h-1 bg-amber-500 mt-2 mb-2 rounded"></div>
+                 <span className="block text-xs text-slate-600 tracking-widest font-semibold uppercase cursor-default">Sweets & Cake</span>
+             </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">{isSetupMode ? 'إعداد حساب المدير' : 'تسجيل الدخول'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{isSetupMode ? 'إعداد حساب المدير السري' : 'تسجيل الدخول'}</h1>
           <p className="text-gray-500 mb-6 text-sm">الرجاء إدخال اسم المستخدم وكلمة المرور.</p>
           {authError && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm border border-red-200">{authError}</div>}
           <form onSubmit={handleAuth} className="space-y-4 text-right">
@@ -1966,7 +1993,6 @@ export default function App() {
             <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="••••••••" minLength="6" />
             <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">{isSetupMode ? 'إنشاء حساب المدير' : 'دخول'}</button>
           </form>
-          {profiles.length === 0 && <button type="button" onClick={() => {setIsSetupMode(!isSetupMode); setAuthError('');}} className="mt-4 text-sm text-amber-600 font-bold hover:underline">{isSetupMode ? 'العودة لتسجيل الدخول' : 'إعداد النظام لأول مرة'}</button>}
         </div>
       </div>
     );
