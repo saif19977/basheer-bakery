@@ -10,6 +10,35 @@ import {
   Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent
 } from 'lucide-react';
 
+// --- صائد الأخطاء لمنع الشاشة البيضاء ---
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorInfo: error.toString() };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("تم اصطياد خطأ:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 m-8 bg-red-50 border-2 border-red-500 rounded-xl text-right" dir="rtl">
+          <h2 className="text-2xl font-bold text-red-700 mb-4">⚠️ عذراً، حدث خطأ برمجي في هذه الصفحة!</h2>
+          <p className="text-gray-700 mb-2">يرجى نسخ رسالة الخطأ أدناه وإرسالها للمبرمج لحلها فوراً:</p>
+          <div className="bg-white p-4 rounded border border-red-200 text-left dir-ltr font-mono text-sm text-red-600 overflow-auto">
+            {this.state.errorInfo}
+          </div>
+          <button onClick={() => window.location.reload()} className="mt-4 bg-red-600 text-white px-4 py-2 rounded font-bold">إعادة تحميل النظام</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // --- إعدادات فايربيس ---
 const firebaseConfig = {
   apiKey: "AIzaSyBxH2YVMpjJ4Gy7GDqtTKJz1FT34lA0M1s",
@@ -82,14 +111,15 @@ const StatusBadge = ({ status }) => {
   return <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>{labels[status] || status}</span>;
 };
 
+// التواريخ محمية بالكامل لمنع الـ Crash
 const formatDate = (dateStr) => {
-  if (!dateStr) return '';
+  if (!dateStr) return 'غير محدد';
   try {
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return '';
+    if (isNaN(d.getTime())) return 'تاريخ غير صالح';
     return d.toLocaleString('ar-IQ', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   } catch(e) {
-    return '';
+    return 'خطأ في التاريخ';
   }
 };
 
@@ -100,7 +130,7 @@ const formatOrderNum = (order) => {
   return '0000';
 };
 
-const getSystemEmail = (userStr) => `${String(userStr).trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
+const getSystemEmail = (userStr) => `${String(userStr || '').trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
 
 const compressImage = (file, maxWidth = 800) => {
   return new Promise((resolve) => {
@@ -123,12 +153,12 @@ const compressImage = (file, maxWidth = 800) => {
 };
 
 const getOrderItems = (order) => {
-  if (order.items && Array.isArray(order.items) && order.items.length > 0) return order.items;
+  if (order?.items && Array.isArray(order.items) && order.items.length > 0) return order.items;
   return [{
-     id: order.id || Date.now(), cakeCategory: order.cakeCategory || '', cakeSize: order.cakeSize || '',
-     customCakeType: order.customCakeType || '', quantity: order.quantity || 1, weight: order.weight || '',
-     price: order.price || 0, orderSource: order.orderSource || 'manufacturing', selectedFG: order.selectedFG || '',
-     itemNotes: order.notes || '', itemImage: (order.images && order.images.length > 0) ? order.images[0] : ''
+     id: order?.id || Date.now(), cakeCategory: order?.cakeCategory || '', cakeSize: order?.cakeSize || '',
+     customCakeType: order?.customCakeType || '', quantity: order?.quantity || 1, weight: order?.weight || '',
+     price: order?.price || 0, orderSource: order?.orderSource || 'manufacturing', selectedFG: order?.selectedFG || '',
+     itemNotes: order?.notes || '', itemImage: (order?.images && order.images.length > 0) ? order.images[0] : ''
   }];
 };
 
@@ -221,18 +251,24 @@ export default function App() {
     const unsubProfiles = onSnapshot(dataPath('profiles'), (snap) => setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubOrders = onSnapshot(dataPath('orders'), (snap) => {
         const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        fetchedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        fetchedOrders.sort((a, b) => {
+           try { return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(); } catch(e) { return 0; }
+        });
         if (prevOrderCount.current !== 0 && fetchedOrders.length > prevOrderCount.current) showNotification("🔔 تم إضافة طلب جديد!");
         prevOrderCount.current = fetchedOrders.length;
         setOrders(fetchedOrders);
     });
     const unsubInventory = onSnapshot(dataPath('inventory'), (snap) => setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const unsubInvLogs = onSnapshot(dataPath('inventory_logs'), (snap) => setInventoryLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => new Date(b.date) - new Date(a.date))));
+    const unsubInvLogs = onSnapshot(dataPath('inventory_logs'), (snap) => setInventoryLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => {
+       try { return new Date(b.date).getTime() - new Date(a.date).getTime(); } catch(e) { return 0; }
+    })));
     const unsubRecipes = onSnapshot(dataPath('recipes'), (snap) => setRecipes(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubFinished = onSnapshot(dataPath('finished_goods'), (snap) => setFinishedGoods(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubTransactions = onSnapshot(dataPath('transactions'), (snap) => {
         const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        txs.sort((a, b) => new Date(b.date) - new Date(a.date));
+        txs.sort((a, b) => {
+           try { return new Date(b.date).getTime() - new Date(a.date).getTime(); } catch(e) { return 0; }
+        });
         setTransactions(txs);
     });
 
@@ -241,7 +277,6 @@ export default function App() {
 
   const myProfile = profiles.find(p => p.uid === user?.uid);
 
-  // التوجيه الذكي للصفحات حسب الصلاحيات
   useEffect(() => {
     if (myProfile) {
        const canAccessCurrent = hasAccess(activeTab);
@@ -278,7 +313,7 @@ export default function App() {
 
   const hasAccess = (tabId) => {
     if (!myProfile) return false;
-    const role = myProfile.role;
+    const role = myProfile?.role;
     if (role === 'admin') return true;
     
     const permissions = {
@@ -310,10 +345,10 @@ export default function App() {
   // --- واجهات العرض ---
   
   const DashboardView = () => {
-    const pendingCount = orders.filter(o => o.status === 'pending' || o.status === 'baking').length;
-    const readyCount = orders.filter(o => o.status === 'ready').length;
-    const finishedCount = finishedGoods.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    const lowStock = inventory.filter(i => Number(i.quantity) < 10).length;
+    const pendingCount = orders.filter(o => o?.status === 'pending' || o?.status === 'baking').length;
+    const readyCount = orders.filter(o => o?.status === 'ready').length;
+    const finishedCount = finishedGoods.reduce((sum, item) => sum + Number(item?.quantity || 0), 0);
+    const lowStock = inventory.filter(i => Number(i?.quantity || 0) < 10).length;
 
     return (
       <div className="space-y-6">
@@ -333,10 +368,10 @@ export default function App() {
                return (
               <div key={o.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 border-b border-gray-100 last:border-0 gap-2 hover:bg-gray-50 cursor-pointer px-2 rounded transition-colors" onClick={() => setActiveTab('Orders')}>
                 <div>
-                  <p className="font-semibold text-gray-800">{o.customerName} - #{formatOrderNum(o)}</p>
+                  <p className="font-semibold text-gray-800">{o.customerName || 'غير محدد'} - #{formatOrderNum(o)}</p>
                   <p className="text-xs text-gray-500">{displayTitle} | {formatDate(o.createdAt)}</p>
                 </div>
-                <div className="self-start sm:self-auto"><StatusBadge status={o.status} /></div>
+                <div className="self-start sm:self-auto"><StatusBadge status={o.status || 'pending'} /></div>
               </div>
             )})}
             {orders.length === 0 && <p className="text-sm text-gray-400 text-center py-4">لا توجد نشاطات حالية.</p>}
@@ -353,13 +388,12 @@ export default function App() {
     const [editingId, setEditingId] = useState(null);
     const [cancelModal, setCancelModal] = useState(null);
     
-    // قائمة العملاء للتعبئة التلقائية
     const uniqueCustomers = React.useMemo(() => {
       const custMap = {};
       orders.forEach(o => {
-         if(o.status !== 'cancelled' && o.phone) {
-            if(!custMap[o.phone] || new Date(o.createdAt) > new Date(custMap[o.phone].date)) {
-               custMap[o.phone] = { name: o.customerName, phone: o.phone, address: o.address, contactMethod: o.contactMethod || 'واتساب', date: o.createdAt };
+         if(o?.status !== 'cancelled' && o?.phone) {
+            if(!custMap[o.phone] || new Date(o.createdAt || 0) > new Date(custMap[o.phone].date)) {
+               custMap[o.phone] = { name: o.customerName || '', phone: o.phone, address: o.address || '', contactMethod: o.contactMethod || 'واتساب', date: o.createdAt };
             }
          }
       });
@@ -376,7 +410,8 @@ export default function App() {
     });
 
     const filteredOrders = orders.filter(o => {
-      const s = String(searchTerm).toLowerCase();
+      if (!o) return false;
+      const s = String(searchTerm || '').toLowerCase();
       const num = String(formatOrderNum(o)).toLowerCase();
       const name = String(o.customerName || '').toLowerCase();
       const phone = String(o.phone || '').toLowerCase();
@@ -408,11 +443,12 @@ export default function App() {
 
     const confirmCancelOrder = async () => {
         const order = cancelModal;
+        if(!order) return;
         const items = getOrderItems(order);
         for(const item of items) {
            if(item.orderSource === 'ready_made' && item.selectedFG) {
               const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
-              if(fgItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: fgItem.quantity + Number(item.quantity) });
+              if(fgItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: Number(fgItem.quantity || 0) + Number(item.quantity || 0) });
            }
         }
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'cancelled', updatedAt: new Date().toISOString() });
@@ -429,13 +465,13 @@ export default function App() {
           if (fgItem) {
              newItems[index].cakeCategory = fgItem.name;
              newItems[index].cakeSize = 'جاهز من المخزن';
-             newItems[index].price = fgItem.price * newItems[index].quantity;
+             newItems[index].price = Number(fgItem.price || 0) * Number(newItems[index].quantity || 1);
              if(fgItem.image) newItems[index].itemImage = fgItem.image;
           }
        }
        if (field === 'quantity' && newItems[index].orderSource === 'ready_made' && newItems[index].selectedFG) {
           const fgItem = finishedGoods.find(g => g.id === newItems[index].selectedFG);
-          if (fgItem) newItems[index].price = fgItem.price * value;
+          if (fgItem) newItems[index].price = Number(fgItem.price || 0) * Number(value);
        }
        
        const autoTotal = newItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
@@ -451,18 +487,17 @@ export default function App() {
 
     const handleSubmit = async (e) => {
       e.preventDefault();
-      
-      let finalForm = { ...form, price: form.totalPrice, notes: form.globalNotes };
+      let finalForm = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes };
       
       if (!editingId) {
          for (let item of finalForm.items) {
             if (item.orderSource === 'ready_made') {
                const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
-               if (!fgItem || fgItem.quantity < item.quantity) {
+               if (!fgItem || Number(fgItem.quantity || 0) < Number(item.quantity || 1)) {
                   showNotification(`❌ الكمية المطلوبة من الصنف "${item.cakeCategory}" غير متوفرة في المخزن التام!`);
                   return;
                }
-               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: fgItem.quantity - item.quantity });
+               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: Number(fgItem.quantity) - Number(item.quantity) });
             }
          }
       }
@@ -474,7 +509,7 @@ export default function App() {
       if (editingId) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', editingId), { ...finalForm, cashStatus: orderCashStatus, updatedAt: new Date().toISOString() });
       } else {
-        const nextOrderNum = orders.length > 0 ? Math.max(...orders.map(o => o.orderNumber || 0)) + 1 : 1;
+        const nextOrderNum = orders.length > 0 ? Math.max(...orders.map(o => Number(o.orderNumber) || 0)) + 1 : 1;
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
           ...finalForm, status: initialStatus, cashStatus: orderCashStatus, createdAt: new Date().toISOString(), orderNumber: nextOrderNum
         });
@@ -518,8 +553,8 @@ export default function App() {
               </td>
               <td className="p-4 font-mono text-sm text-gray-500 font-bold">#{formatOrderNum(o)}</td>
               <td className="p-4">
-                 <p className="font-medium text-gray-800">{o.customerName}</p>
-                 <p className="text-xs text-gray-500 dir-ltr text-right font-mono">{o.phone}</p>
+                 <p className="font-medium text-gray-800">{o.customerName || 'غير محدد'}</p>
+                 <p className="text-xs text-gray-500 dir-ltr text-right font-mono">{o.phone || '-'}</p>
                  <div className="mt-1 flex gap-1">
                     <span className="text-[10px] bg-gray-100 px-1 rounded text-gray-600 border">{o.contactMethod || 'مباشر'}</span>
                     <span className={`text-[10px] px-1 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
@@ -535,7 +570,7 @@ export default function App() {
                  <div className="font-bold text-amber-600 mt-1 border-t pt-1 border-gray-100">الإجمالي: {formatMoney(o.price)} IQD</div>
               </td>
               <td className="p-4"><Countdown deliveryDate={o.deliveryDate} /></td>
-              <td className="p-4"><StatusBadge status={o.status} /></td>
+              <td className="p-4"><StatusBadge status={o.status || 'pending'} /></td>
               <td className="p-4 flex gap-2">
                 <button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors" title="طباعة الفاتورة"><Printer size={18} /></button>
                 <button onClick={() => handleEdit(o)} className="text-blue-600 hover:text-blue-800 p-2 bg-blue-50 rounded-lg transition-colors" title="تعديل"><Edit size={18} /></button>
@@ -612,7 +647,7 @@ export default function App() {
                                    <label className="block text-xs font-bold text-gray-700 mb-1">اختر من المخزن التام</label>
                                    <select required={!editingId} value={item.selectedFG} onChange={e => handleItemChange(index, 'selectedFG', e.target.value)} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-green-500 bg-white">
                                      <option value="">-- اختر منتجاً --</option>
-                                     {finishedGoods.map(g => <option key={g.id} value={g.id} disabled={g.quantity === 0}>{g.name} (متوفر: {g.quantity}) - {formatMoney(g.price)} IQD</option>)}
+                                     {finishedGoods.map(g => <option key={g.id} value={g.id} disabled={Number(g.quantity||0) === 0}>{g.name} (متوفر: {g.quantity}) - {formatMoney(g.price)} IQD</option>)}
                                    </select>
                                  </div>
                               ) : (
@@ -686,7 +721,7 @@ export default function App() {
 
   const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSecondaryAction }) => {
     if (!isOpen || !order) return null;
-    const hideSensitiveInfo = type ? type.includes('production') : false;
+    const hideSensitiveInfo = type ? String(type).includes('production') : false;
     const items = getOrderItems(order);
 
     return (
@@ -696,7 +731,7 @@ export default function App() {
               <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <div className="flex justify-between items-start mb-2">
                    <div>
-                     <p className="font-bold text-gray-800 text-lg">{order.customerName}</p>
+                     <p className="font-bold text-gray-800 text-lg">{order.customerName || 'غير محدد'}</p>
                      <div className="flex gap-2 mt-1">
                         <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1"><Phone size={10}/> {order.contactMethod || 'مباشر'}</span>
                         <span className={`text-xs px-2 py-0.5 rounded border font-bold ${order.paymentType === 'آجل' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-green-100 text-green-800 border-green-200'}`}>{order.paymentType || 'نقد'}</span>
@@ -704,8 +739,8 @@ export default function App() {
                    </div>
                    <span className="font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 text-lg">{formatMoney(order.price)} IQD</span>
                 </div>
-                <p className="text-sm text-gray-600 mb-2 dir-ltr text-right font-mono font-bold">{order.phone}</p>
-                <p className="text-sm text-gray-700 bg-white p-2 rounded border"><span className="font-bold">العنوان:</span> {order.address}</p>
+                <p className="text-sm text-gray-600 mb-2 dir-ltr text-right font-mono font-bold">{order.phone || '-'}</p>
+                <p className="text-sm text-gray-700 bg-white p-2 rounded border"><span className="font-bold">العنوان:</span> {order.address || '-'}</p>
                 {order.notes && <p className="mt-2 text-sm text-gray-700 bg-yellow-50 p-2 rounded border border-yellow-200"><span className="font-bold">ملاحظات التوصيل:</span> {order.notes}</p>}
               </div>
            )}
@@ -766,7 +801,7 @@ export default function App() {
     const [searchTerm, setSearchTerm] = useState('');
     const customersMap = {};
     orders.forEach(o => {
-      if(o.status === 'cancelled') return;
+      if(!o || o.status === 'cancelled') return;
       const phone = String(o.phone || '').trim() || 'بدون رقم';
       if(!customersMap[phone]) {
          customersMap[phone] = { phone: phone, name: String(o.customerName || ''), address: String(o.address || ''), methods: new Set(), paymentTypes: new Set(), totalSpent: 0, orderCount: 0, lastOrder: o.createdAt };
@@ -775,7 +810,7 @@ export default function App() {
       if(o.paymentType) customersMap[phone].paymentTypes.add(o.paymentType);
       if(o.status === 'completed' || o.cashStatus === 'received_by_finance') customersMap[phone].totalSpent += Number(o.price || 0);
       customersMap[phone].orderCount += 1;
-      if(new Date(o.createdAt) > new Date(customersMap[phone].lastOrder)) {
+      if(new Date(o.createdAt || 0) > new Date(customersMap[phone].lastOrder)) {
           customersMap[phone].lastOrder = o.createdAt;
           customersMap[phone].name = String(o.customerName || ''); 
           customersMap[phone].address = String(o.address || '');
@@ -798,7 +833,7 @@ export default function App() {
           <StatCard title="إجمالي عدد العملاء" value={Object.keys(customersMap).length} icon={Users} colorClass="bg-blue-100 text-blue-600" />
         </div>
 
-        <Table headers={['اسم العميل', 'رقم الهاتف', 'التفضيلات', 'إجمالي الطلبات', 'إجمالي المدفوعات', 'آخر طلب', 'العنوان המعتاد']}>
+        <Table headers={['اسم العميل', 'رقم الهاتف', 'التفضيلات', 'إجمالي الطلبات', 'إجمالي المدفوعات', 'آخر طلب', 'العنوان المعتاد']}>
           {customersList.map((c, i) => (
              <tr key={i} className="hover:bg-gray-50">
                <td className="p-4 font-bold text-gray-800">{c.name}</td>
@@ -820,9 +855,9 @@ export default function App() {
   };
 
   const ProductionView = () => {
-    const pendingOrders = orders.filter(o => o.status === 'pending');
-    const bakingOrders = orders.filter(o => o.status === 'baking');
-    const completedOrders = orders.filter(o => ['ready', 'out_for_delivery', 'completed'].includes(o.status)).slice(0, 10);
+    const pendingOrders = orders.filter(o => o?.status === 'pending');
+    const bakingOrders = orders.filter(o => o?.status === 'baking');
+    const completedOrders = orders.filter(o => o && ['ready', 'out_for_delivery', 'completed'].includes(o.status)).slice(0, 10);
     
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [orderType, setOrderType] = useState(''); 
@@ -980,7 +1015,7 @@ export default function App() {
                 </td>
                 <td className="p-4 font-medium text-sm">{displayTitle}</td>
                 <td className="p-4 text-sm text-gray-500">{formatDate(o.updatedAt || o.createdAt)}</td>
-                <td className="p-4"><StatusBadge status={o.status} /></td>
+                <td className="p-4"><StatusBadge status={o.status || 'completed'} /></td>
               </tr>
             )})}
             {completedOrders.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">السجل فارغ.</td></tr>}
@@ -1021,7 +1056,7 @@ export default function App() {
     const [addQty, setAddQty] = useState(1);
     const [sellForm, setSellForm] = useState({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
 
-    const filteredGoods = finishedGoods.filter(g => String(g.name || '').toLowerCase().includes(String(searchTerm).toLowerCase()) || (g.code && String(g.code).toLowerCase().includes(String(searchTerm).toLowerCase())));
+    const filteredGoods = finishedGoods.filter(g => String(g?.name || '').toLowerCase().includes(String(searchTerm).toLowerCase()) || (g?.code && String(g.code).toLowerCase().includes(String(searchTerm).toLowerCase())));
 
     const handleUpload = async (e) => {
       const file = e.target.files[0];
@@ -1033,10 +1068,10 @@ export default function App() {
 
     const handleAddItem = async (e) => {
       e.preventDefault();
-      const existingItem = finishedGoods.find(item => item.name.trim() === form.name.trim() && item.code === form.code);
+      const existingItem = finishedGoods.find(item => String(item.name).trim() === String(form.name).trim() && item.code === form.code);
       if (existingItem) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', existingItem.id), {
-          quantity: existingItem.quantity + Number(form.quantity), price: Number(form.price) || existingItem.price, lastAddedAt: new Date().toISOString()
+          quantity: Number(existingItem.quantity || 0) + Number(form.quantity), price: Number(form.price) || existingItem.price, lastAddedAt: new Date().toISOString()
         });
         showNotification(`تم إضافة ${form.quantity} للرصيد السابق.`);
       } else {
@@ -1052,7 +1087,7 @@ export default function App() {
     const confirmAddStock = async (e) => {
        e.preventDefault();
        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', addStockModal.id), {
-          quantity: addStockModal.quantity + addQty,
+          quantity: Number(addStockModal.quantity || 0) + addQty,
           lastAddedAt: new Date().toISOString()
        });
        showNotification("تم زيادة رصيد المنتج بنجاح.");
@@ -1068,10 +1103,10 @@ export default function App() {
 
     const handleSell = async (e) => {
       e.preventDefault();
-      if (sellQty > selectedItem.quantity) { showNotification("❌ الكمية المطلوبة أكبر من المتوفر!"); return; }
+      if (sellQty > Number(selectedItem.quantity || 0)) { showNotification("❌ الكمية المطلوبة أكبر من المتوفر!"); return; }
       
-      const newQty = selectedItem.quantity - sellQty;
-      const totalRevenue = sellQty * selectedItem.price;
+      const newQty = Number(selectedItem.quantity || 0) - sellQty;
+      const totalRevenue = sellQty * Number(selectedItem.price || 0);
       const now = new Date().toISOString();
       const orderCashStatus = sellForm.paymentType === 'نقد' ? 'pending_delivery' : 'credit_unpaid';
 
@@ -1135,11 +1170,11 @@ export default function App() {
                 <p className="text-green-700 font-bold text-lg mb-2">{formatMoney(item.price)} IQD</p>
                 <div className="bg-gray-50 rounded p-2 mb-4 border border-gray-100">
                    <p className="text-sm text-gray-600 flex justify-between items-center mb-1">الرصيد المتوفر: <span className={`font-bold text-lg ${item.quantity < 5 ? 'text-red-600' : 'text-blue-700'}`}>{item.quantity}</span></p>
-                   <p className="text-[10px] text-gray-500 border-t pt-1 mt-1 border-gray-200">آخر إضافة: {formatDate(item.lastAddedAt || item.addedAt) || 'غير محدد'}</p>
+                   <p className="text-[10px] text-gray-500 border-t pt-1 mt-1 border-gray-200">آخر إضافة: {formatDate(item.lastAddedAt || item.addedAt)}</p>
                 </div>
                 <div className="mt-auto grid grid-cols-2 gap-2">
                    <button onClick={() => {setAddStockModal(item); setAddQty(1);}} className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 py-2 rounded-lg text-xs font-bold transition-colors flex justify-center items-center gap-1 border border-blue-200"><Plus size={14}/> إضافة رصيد</button>
-                   <button onClick={() => {setSelectedItem(item); setSellQty(1); setSellForm({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' }); setSellModalOpen(true);}} disabled={item.quantity === 0} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white py-2 rounded-lg text-xs font-bold transition-colors flex justify-center items-center gap-1"><Tag size={14} /> سحب/بيع</button>
+                   <button onClick={() => {setSelectedItem(item); setSellQty(1); setSellForm({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' }); setSellModalOpen(true);}} disabled={Number(item.quantity||0) === 0} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-300 text-white py-2 rounded-lg text-xs font-bold transition-colors flex justify-center items-center gap-1"><Tag size={14} /> سحب/بيع</button>
                 </div>
               </div>
             </div>
@@ -1211,7 +1246,7 @@ export default function App() {
               
               <div className={`${sellForm.type === 'direct' ? 'bg-green-50 border-green-200 text-green-900' : 'bg-gray-50 border-gray-200 text-gray-800'} p-4 rounded-lg border`}>
                 <p className="text-sm font-medium mb-1">الإجمالي المستحق:</p>
-                <p className="text-2xl font-bold">{formatMoney(sellQty * selectedItem.price)} IQD</p>
+                <p className="text-2xl font-bold">{formatMoney(sellQty * Number(selectedItem.price || 0))} IQD</p>
               </div>
 
               <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
@@ -1220,6 +1255,216 @@ export default function App() {
             </form>
           </Modal>
         )}
+      </div>
+    );
+  };
+
+  const DeliveryView = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [viewMode, setViewMode] = useState('active');
+    const [selectedOrder, setSelectedOrder] = useState(null);
+
+    const activeDeliveries = orders.filter(o => o && ['ready', 'out_for_delivery'].includes(o.status));
+    const historyDeliveries = orders.filter(o => o?.status === 'completed');
+
+    // حماية بحث قسم التوصيل
+    const displayedOrders = (viewMode === 'active' ? activeDeliveries : historyDeliveries).filter(o => {
+      if (!o) return false;
+      const sTerm = String(searchTerm || '').toLowerCase();
+      const orderSearchNum = String(formatOrderNum(o)).toLowerCase();
+      const nameStr = String(o.customerName || '').toLowerCase();
+      const phoneStr = String(o.phone || '').toLowerCase();
+      const addressStr = String(o.address || '').toLowerCase();
+      return nameStr.includes(sTerm) || phoneStr.includes(sTerm) || addressStr.includes(sTerm) || orderSearchNum.includes(sTerm);
+    });
+
+    const handleDispatch = async (order) => {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
+      setSelectedOrder(null);
+    };
+
+    const handleDelivered = async (order) => {
+      const now = new Date().toISOString();
+      const updateData = { status: 'completed', completedAt: now };
+      
+      if (order.paymentType === 'نقد' || !order.paymentType) {
+         updateData.cashStatus = 'with_driver'; 
+         showNotification("تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.");
+      } else {
+         updateData.cashStatus = 'credit_unpaid';
+         showNotification("تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.");
+      }
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
+      setSelectedOrder(null);
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-gray-800">التوصيل والشحن</h2>
+          <div className="relative w-full md:w-64"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم، الهاتف، الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setViewMode('active')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'active' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الطلبات الحالية</button>
+          <button onClick={() => setViewMode('history')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'history' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>السجل العام</button>
+        </div>
+
+        {viewMode === 'active' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {displayedOrders.filter(o => o.status === 'ready').map(o => (
+                  <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
+                    <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                    <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                    <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                    <div className="mt-auto pt-2 flex justify-between items-center">
+                       <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                       <Countdown deliveryDate={o.deliveryDate} />
+                    </div>
+                  </div>
+                ))}
+                {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات.</p>}
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
+                  <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
+                     <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                     <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                     <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                     <div className="mt-auto pt-2 flex justify-between items-center">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                        <Countdown deliveryDate={o.deliveryDate} />
+                     </div>
+                  </div>
+                ))}
+                 {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Table headers={['رقم الطلب', 'العميل', 'الهاتف', 'الدفع', 'تاريخ التسليم', 'الفاتورة']}>
+            {displayedOrders.map(o => (
+              <tr key={o.id} className="hover:bg-gray-50">
+                <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+                <td className="p-4 font-medium">{o.customerName || 'غير محدد'}</td>
+                <td className="p-4 dir-ltr text-right text-sm font-mono">{o.phone || '-'}</td>
+                <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
+                <td className="p-4 text-sm text-gray-500">{formatDate(o.completedAt)}</td>
+                <td className="p-4"><button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors"><Printer size={16} /></button></td>
+              </tr>
+            ))}
+          </Table>
+        )}
+
+        <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : 'delivery_complete'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} />
+      </div>
+    );
+  };
+
+  const SalesView = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
+    // حماية مشكلة الشاشة البيضاء في بحث سجل المبيعات
+    const completed = orders.filter(o => {
+      if (!o) return false;
+      const searchNum = String(formatOrderNum(o)).toLowerCase();
+      const nameStr = String(o.customerName || '').toLowerCase();
+      const sTerm = String(searchTerm || '').toLowerCase();
+      const matchSearch = (nameStr.includes(sTerm) || searchNum.includes(sTerm));
+      
+      if (o.status !== 'completed' || !matchSearch) return false;
+      
+      try {
+         if (startDate && new Date(o.completedAt || 0) < new Date(startDate)) return false;
+         if (endDate && new Date(o.completedAt || 0) > new Date(endDate + 'T23:59:59')) return false;
+      } catch(e) {
+         // تجاهل الخطأ في التاريخ وإكمال الفلترة
+      }
+      return true;
+    });
+    
+    const monthlyData = {};
+    completed.forEach(o => {
+      let monthYear = 'غير محدد';
+      try {
+         if (o.completedAt) {
+            const d = new Date(o.completedAt);
+            if (!isNaN(d.getTime())) {
+               const y = d.getFullYear();
+               const m = String(d.getMonth() + 1).padStart(2, '0');
+               monthYear = `${y}-${m}`;
+            }
+         }
+      } catch(e) {}
+
+      if (!monthlyData[monthYear]) monthlyData[monthYear] = { count: 0, revenue: 0 };
+      monthlyData[monthYear].count += 1;
+      monthlyData[monthYear].revenue += Number(o.price || 0);
+    });
+
+    const totalSales = completed.reduce((sum, o) => sum + Number(o.price || 0), 0);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-gray-800">سجل المبيعات</h2>
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-48"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم أو الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm" /></div>
+            <div className="flex items-center gap-2">
+               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="من تاريخ" />
+               <span className="text-gray-400">-</span>
+               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="إلى تاريخ" />
+            </div>
+            <button onClick={() => setPrintData({ printType: 'sales_report', data: completed, startDate, endDate, totalSales })} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors whitespace-nowrap"><Printer size={18} /> طباعة التقرير</button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <StatCard title="الطلبات المكتملة ضمن البحث" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
+          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${formatMoney(totalSales)} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
+        </div>
+        
+        <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية ضمن البحث</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+          {Object.entries(monthlyData).sort().reverse().map(([month, data]) => (
+            <div key={month} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-1 h-full bg-amber-500"></div>
+              <h4 className="font-bold text-gray-700 mb-2 dir-ltr text-right">{month}</h4>
+              <p className="text-sm text-gray-500 mb-1">الطلبات: <span className="font-bold text-gray-700">{data.count}</span></p>
+              <p className="text-xl font-bold text-green-600 mt-2">{formatMoney(data.revenue)} IQD</p>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">التفاصيل والأرباح لكل طلب</h3>
+        <Table headers={['رقم الطلب', 'تاريخ الاكتمال', 'العميل', 'المبلغ المستلم', 'التكلفة (COGS)', 'صافي ربح الطلب']}>
+          {completed.map(o => {
+            const price = Number(o?.price || 0);
+            const cogs = Number(o?.cogs || 0);
+            const profit = price - cogs;
+            const margin = price > 0 ? ((profit / price) * 100).toFixed(1) : 0;
+            return (
+             <tr key={o.id} className="hover:bg-gray-50">
+               <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+               <td className="p-4 text-xs text-gray-500">{formatDate(o.completedAt)}</td>
+               <td className="p-4 font-medium text-sm">{o.customerName || 'غير محدد'}</td>
+               <td className="p-4 font-semibold text-green-700">{formatMoney(price)} IQD</td>
+               <td className="p-4 font-semibold text-orange-700">{formatMoney(cogs)} IQD</td>
+               <td className="p-4 font-bold text-blue-700">{formatMoney(profit)} IQD <span className="text-xs text-gray-500 font-normal">({margin}%)</span></td>
+             </tr>
+          )})}
+          {completed.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبيعات مطابقة لبحثك.</td></tr>}
+        </Table>
       </div>
     );
   };
@@ -1606,25 +1851,35 @@ export default function App() {
     const allCategories = { ...incomeCategories, ...expenseCategories, ...legacyCategories };
 
     const fullyFilteredTransactions = transactions.filter(t => {
+       if (!t) return false;
        if (filterCategory !== 'all' && t.category !== filterCategory) return false;
-       if (startDate && new Date(t.date) < new Date(startDate)) return false;
-       if (endDate && new Date(t.date) > new Date(endDate + 'T23:59:59')) return false;
+       try {
+         if (startDate && new Date(t.date || 0) < new Date(startDate)) return false;
+         if (endDate && new Date(t.date || 0) > new Date(endDate + 'T23:59:59')) return false;
+       } catch(e) {}
        return true;
     });
 
-    const calcTotal = (condition) => fullyFilteredTransactions.filter(condition).reduce((sum, t) => sum + Number(t.amount), 0);
+    const calcTotal = (condition) => fullyFilteredTransactions.filter(condition).reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const filteredIncome = calcTotal(t => t.type === 'income');
     const filteredExpense = calcTotal(t => t.type === 'expense');
     
     const plIncome = filteredIncome;
-    const plOrders = orders.filter(o => o.status === 'completed' && (!startDate || new Date(o.completedAt) >= new Date(startDate)) && (!endDate || new Date(o.completedAt) <= new Date(endDate + 'T23:59:59')));
-    const plCogs = plOrders.reduce((sum, o) => sum + Number(o.cogs || 0), 0);
+    const plOrders = orders.filter(o => {
+       if (!o || o.status !== 'completed') return false;
+       try {
+         if (startDate && new Date(o.completedAt || 0) < new Date(startDate)) return false;
+         if (endDate && new Date(o.completedAt || 0) > new Date(endDate + 'T23:59:59')) return false;
+       } catch(e) {}
+       return true;
+    });
+    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0);
     const plGrossProfit = plIncome - plCogs;
     const plNetProfit = plGrossProfit - filteredExpense;
     const plProfitMargin = plIncome > 0 ? ((plNetProfit / plIncome) * 100).toFixed(1) : 0;
 
-    const driverCashOrders = orders.filter(o => o.status === 'completed' && o.paymentType === 'نقد' && o.cashStatus === 'with_driver');
-    const creditOrders = orders.filter(o => o.paymentType === 'آجل' && o.cashStatus === 'credit_unpaid');
+    const driverCashOrders = orders.filter(o => o?.status === 'completed' && o?.paymentType === 'نقد' && o?.cashStatus === 'with_driver');
+    const creditOrders = orders.filter(o => o?.paymentType === 'آجل' && o?.cashStatus === 'credit_unpaid');
 
     const handleSubmit = async (e) => {
       e.preventDefault();
@@ -1712,7 +1967,7 @@ export default function App() {
                     <tr key={o.id} className="hover:bg-gray-50">
                        <td className="p-4 font-mono text-xs font-bold text-gray-500">#{formatOrderNum(o)}</td>
                        <td className="p-4 text-sm">{formatDate(o.completedAt)}</td>
-                       <td className="p-4 font-bold text-sm">{o.customerName}</td>
+                       <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                        <td className="p-4 text-sm text-gray-600">مندوب التوصيل</td>
                        <td className="p-4 font-bold text-red-600">{formatMoney(o.price)} IQD</td>
                        <td className="p-4"><button onClick={() => confirmDriverCash(o)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1"><ArrowRightLeft size={14}/> استلام النقدية</button></td>
@@ -1731,8 +1986,8 @@ export default function App() {
                     <tr key={o.id} className="hover:bg-gray-50">
                        <td className="p-4 font-mono text-xs font-bold text-gray-500">#{formatOrderNum(o)}</td>
                        <td className="p-4 text-sm">{formatDate(o.createdAt)}</td>
-                       <td className="p-4 font-bold text-sm">{o.customerName}</td>
-                       <td className="p-4 font-mono text-xs dir-ltr text-right">{o.phone}</td>
+                       <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
+                       <td className="p-4 font-mono text-xs dir-ltr text-right">{o.phone || '-'}</td>
                        <td className="p-4 font-bold text-orange-600">{formatMoney(o.price)} IQD</td>
                        <td className="p-4"><button onClick={() => confirmCreditPayment(o)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1"><CheckCircle size={14}/> تسديد الدين</button></td>
                     </tr>
@@ -1928,7 +2183,7 @@ export default function App() {
   const isInvoicePrint = printData?.printType === 'invoice';
 
   return (
-    <>
+    <ErrorBoundary>
       <style dangerouslySetInnerHTML={{__html: `
         @media print { 
            body * { visibility: hidden; } 
@@ -1971,20 +2226,20 @@ export default function App() {
             {isProductionPrint ? (
               <div className="bg-gray-100 p-4 rounded-lg text-center mb-4 border border-gray-300">
                  <p className="font-bold text-xl text-gray-800">قسم الإنتاج - المعمل</p>
-                 <p className="text-sm mt-2 text-red-600 font-bold">موعد التسليم المطلوب: {formatDate(printData.deliveryDate) || 'غير محدد'}</p>
+                 <p className="text-sm mt-2 text-red-600 font-bold">موعد التسليم المطلوب: {formatDate(printData.deliveryDate)}</p>
               </div>
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border">
-                   <p><strong>العميل:</strong> {printData.customerName}</p>
-                   <p><strong>الهاتف:</strong> <span className="dir-ltr inline-block font-mono">{printData.phone}</span></p>
+                   <p><strong>العميل:</strong> {printData.customerName || 'غير محدد'}</p>
+                   <p><strong>الهاتف:</strong> <span className="dir-ltr inline-block font-mono">{printData.phone || '-'}</span></p>
                 </div>
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border">
-                   <p><strong>العنوان:</strong> {printData.address}</p>
+                   <p><strong>العنوان:</strong> {printData.address || '-'}</p>
                    <p><strong>طريقة الدفع والتواصل:</strong> {printData.paymentType || 'نقد'} / {printData.contactMethod || 'مباشر'}</p>
                 </div>
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                   <p><strong>موعد التسليم للزبون:</strong> {formatDate(printData.deliveryDate) || 'غير محدد'}</p>
+                   <p><strong>موعد التسليم للزبون:</strong> {formatDate(printData.deliveryDate)}</p>
                 </div>
               </>
             )}
@@ -2035,24 +2290,24 @@ export default function App() {
           </div>
           
           <div className="grid grid-cols-4 gap-4 mb-6">
-             <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">الطلبات المكتملة</p><p className="font-bold text-lg text-blue-900">{printData.data.length}</p></div>
+             <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">الطلبات المكتملة</p><p className="font-bold text-lg text-blue-900">{printData.data?.length || 0}</p></div>
              <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">إجمالي المبيعات</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totalSales)} IQD</p></div>
-             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">إجمالي التكلفة (COGS)</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.data.reduce((sum, o)=> sum + Number(o.cogs || 0), 0))} IQD</p></div>
-             <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 text-center"><p className="text-xs text-amber-800">صافي أرباح المبيعات</p><p className="font-bold text-lg text-amber-900">{formatMoney(printData.totalSales - printData.data.reduce((sum, o)=> sum + Number(o.cogs || 0), 0))} IQD</p></div>
+             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">إجمالي التكلفة (COGS)</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.data?.reduce((sum, o)=> sum + Number(o?.cogs || 0), 0) || 0)} IQD</p></div>
+             <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 text-center"><p className="text-xs text-amber-800">صافي أرباح المبيعات</p><p className="font-bold text-lg text-amber-900">{formatMoney((printData.totalSales || 0) - (printData.data?.reduce((sum, o)=> sum + Number(o?.cogs || 0), 0) || 0))} IQD</p></div>
           </div>
 
           <table className="w-full text-right border-collapse border border-gray-300">
              <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
              <tbody>
-                {printData.data.map(o => {
-                   const profit = Number(o.price || 0) - Number(o.cogs || 0);
+                {printData.data?.map(o => {
+                   const profit = Number(o?.price || 0) - Number(o?.cogs || 0);
                    return (
-                   <tr key={o.id}>
+                   <tr key={o?.id || Math.random()}>
                       <td className="p-3 border border-gray-300 font-mono text-xs">#{formatOrderNum(o)}</td>
-                      <td className="p-3 border border-gray-300 text-xs">{formatDate(o.completedAt)}</td>
-                      <td className="p-3 border border-gray-300 text-sm">{o.customerName}</td>
+                      <td className="p-3 border border-gray-300 text-xs">{formatDate(o?.completedAt)}</td>
+                      <td className="p-3 border border-gray-300 text-sm">{o?.customerName || 'غير محدد'}</td>
                       <td className="p-3 border border-gray-300 text-xs">{getOrderItems(o).map((i, idx) => <div key={idx}>{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</div>)}</td>
-                      <td className="p-3 border border-gray-300 font-bold">{formatMoney(o.price)}</td>
+                      <td className="p-3 border border-gray-300 font-bold">{formatMoney(o?.price)}</td>
                    </tr>
                 )})}
              </tbody>
@@ -2073,21 +2328,21 @@ export default function App() {
             </p>
           </div>
           <div className="grid grid-cols-4 gap-4 mb-6">
-             <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">إجمالي الإيرادات</p><p className="font-bold text-lg text-blue-900">{formatMoney(printData.totals.plIncome)} IQD</p></div>
-             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals.plCogs)} IQD</p></div>
-             <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">المصروفات العامة</p><p className="font-bold text-lg text-red-900">{formatMoney(printData.totals.filteredExpense)} IQD</p></div>
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals.plNetProfit)} IQD</p><p className="text-[10px] text-green-700 mt-1">الهامش: {printData.totals.plProfitMargin}%</p></div>
+             <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">إجمالي الإيرادات</p><p className="font-bold text-lg text-blue-900">{formatMoney(printData.totals?.plIncome)} IQD</p></div>
+             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
+             <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">المصروفات العامة</p><p className="font-bold text-lg text-red-900">{formatMoney(printData.totals?.filteredExpense)} IQD</p></div>
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.plNetProfit)} IQD</p><p className="text-[10px] text-green-700 mt-1">الهامش: {printData.totals?.plProfitMargin}%</p></div>
           </div>
           <h4 className="font-bold text-gray-800 mb-2">تفاصيل الحركات المالية (ضمن الفترة)</h4>
           <table className="w-full text-right border-collapse border border-gray-300">
              <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">النوع</th><th className="p-3 border border-gray-300 text-sm">البيان (الوصف)</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
              <tbody>
-                {printData.data.map(t => (
-                   <tr key={t.id}>
-                      <td className="p-3 border border-gray-300 text-xs whitespace-nowrap">{formatDate(t.date)}</td>
-                      <td className="p-3 border border-gray-300 text-xs font-bold">{t.type === 'income' ? 'إيراد (+)' : 'مصروف (-)'}</td>
-                      <td className="p-3 border border-gray-300 text-sm">{t.description}</td>
-                      <td className="p-3 border border-gray-300 font-bold dir-ltr text-right">{t.type === 'income' ? '+' : '-'} {formatMoney(t.amount)}</td>
+                {printData.data?.map(t => (
+                   <tr key={t?.id || Math.random()}>
+                      <td className="p-3 border border-gray-300 text-xs whitespace-nowrap">{formatDate(t?.date)}</td>
+                      <td className="p-3 border border-gray-300 text-xs font-bold">{t?.type === 'income' ? 'إيراد (+)' : 'مصروف (-)'}</td>
+                      <td className="p-3 border border-gray-300 text-sm">{t?.description || '-'}</td>
+                      <td className="p-3 border border-gray-300 font-bold dir-ltr text-right">{t?.type === 'income' ? '+' : '-'} {formatMoney(t?.amount)}</td>
                    </tr>
                 ))}
              </tbody>
@@ -2166,6 +2421,6 @@ export default function App() {
           </div>
         </main>
       </div>
-    </>
+    </ErrorBoundary>
   );
 }
