@@ -84,12 +84,23 @@ const StatusBadge = ({ status }) => {
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleString('ar-IQ', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString('ar-IQ', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch(e) {
+    return '';
+  }
 };
 
-const formatOrderNum = (order) => order.orderNumber ? String(order.orderNumber).padStart(4, '0') : order.id.slice(0,6).toUpperCase();
+const formatOrderNum = (order) => {
+  if (!order) return '0000';
+  if (order.orderNumber) return String(order.orderNumber).padStart(4, '0');
+  if (order.id) return String(order.id).slice(0,6).toUpperCase();
+  return '0000';
+};
 
-const getSystemEmail = (userStr) => `${userStr.trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
+const getSystemEmail = (userStr) => `${String(userStr).trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
 
 const compressImage = (file, maxWidth = 800) => {
   return new Promise((resolve) => {
@@ -112,7 +123,7 @@ const compressImage = (file, maxWidth = 800) => {
 };
 
 const getOrderItems = (order) => {
-  if (order.items && order.items.length > 0) return order.items;
+  if (order.items && Array.isArray(order.items) && order.items.length > 0) return order.items;
   return [{
      id: order.id || Date.now(), cakeCategory: order.cakeCategory || '', cakeSize: order.cakeSize || '',
      customCakeType: order.customCakeType || '', quantity: order.quantity || 1, weight: order.weight || '',
@@ -128,22 +139,28 @@ const Countdown = ({ deliveryDate }) => {
   useEffect(() => {
     if (!deliveryDate) return;
     const calculateTime = () => {
-      const target = new Date(deliveryDate).getTime();
-      const now = new Date().getTime();
-      const diff = target - now;
-      if (diff <= 0) { setIsLate(true); setTimeLeft('متأخر عن الموعد!'); return; }
-      const targetDateObj = new Date(deliveryDate);
-      const todayObj = new Date();
-      const isToday = targetDateObj.getDate() === todayObj.getDate() && targetDateObj.getMonth() === todayObj.getMonth() && targetDateObj.getFullYear() === todayObj.getFullYear();
+      try {
+        const targetDateObj = new Date(deliveryDate);
+        const target = targetDateObj.getTime();
+        if(isNaN(target)) return;
 
-      if (isToday) {
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setTimeLeft(`متبقي ${hours} ساعة و ${minutes} دقيقة`);
-        setIsLate(false);
-      } else {
-        setTimeLeft(new Date(deliveryDate).toLocaleDateString('ar-IQ', { weekday: 'long', month: 'short', day: 'numeric' }));
-        setIsLate(false);
+        const now = new Date().getTime();
+        const diff = target - now;
+        if (diff <= 0) { setIsLate(true); setTimeLeft('متأخر عن الموعد!'); return; }
+        const todayObj = new Date();
+        const isToday = targetDateObj.getDate() === todayObj.getDate() && targetDateObj.getMonth() === todayObj.getMonth() && targetDateObj.getFullYear() === todayObj.getFullYear();
+
+        if (isToday) {
+          const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          setTimeLeft(`متبقي ${hours} ساعة و ${minutes} دقيقة`);
+          setIsLate(false);
+        } else {
+          setTimeLeft(targetDateObj.toLocaleDateString('ar-IQ', { weekday: 'long', month: 'short', day: 'numeric' }));
+          setIsLate(false);
+        }
+      } catch(e) {
+        setTimeLeft('');
       }
     };
     calculateTime();
@@ -151,7 +168,7 @@ const Countdown = ({ deliveryDate }) => {
     return () => clearInterval(timer);
   }, [deliveryDate]);
 
-  if (!deliveryDate) return null;
+  if (!deliveryDate || !timeLeft) return null;
 
   return (
     <div className={`flex items-center justify-center gap-1.5 text-xs font-bold px-2 py-1 rounded-md mt-2 ${isLate ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse' : timeLeft.includes('متبقي') ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-gray-100 text-gray-600'}`}>
@@ -295,7 +312,7 @@ export default function App() {
   const DashboardView = () => {
     const pendingCount = orders.filter(o => o.status === 'pending' || o.status === 'baking').length;
     const readyCount = orders.filter(o => o.status === 'ready').length;
-    const finishedCount = finishedGoods.reduce((sum, item) => sum + Number(item.quantity), 0);
+    const finishedCount = finishedGoods.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     const lowStock = inventory.filter(i => Number(i.quantity) < 10).length;
 
     return (
@@ -359,8 +376,12 @@ export default function App() {
     });
 
     const filteredOrders = orders.filter(o => {
-      const orderSearchNum = formatOrderNum(o);
-      const matchesSearch = o.customerName?.includes(searchTerm) || o.phone?.includes(searchTerm) || orderSearchNum.includes(searchTerm);
+      const s = String(searchTerm).toLowerCase();
+      const num = String(formatOrderNum(o)).toLowerCase();
+      const name = String(o.customerName || '').toLowerCase();
+      const phone = String(o.phone || '').toLowerCase();
+      
+      const matchesSearch = name.includes(s) || phone.includes(s) || num.includes(s);
       if (!matchesSearch) return false;
       if (filter === 'active') return ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status);
       if (filter === 'completed') return o.status === 'completed';
@@ -665,7 +686,7 @@ export default function App() {
 
   const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSecondaryAction }) => {
     if (!isOpen || !order) return null;
-    const hideSensitiveInfo = type.includes('production');
+    const hideSensitiveInfo = type ? type.includes('production') : false;
     const items = getOrderItems(order);
 
     return (
@@ -746,9 +767,9 @@ export default function App() {
     const customersMap = {};
     orders.forEach(o => {
       if(o.status === 'cancelled') return;
-      const phone = o.phone?.trim() || 'بدون رقم';
+      const phone = String(o.phone || '').trim() || 'بدون رقم';
       if(!customersMap[phone]) {
-         customersMap[phone] = { phone: phone, name: o.customerName, address: o.address, methods: new Set(), paymentTypes: new Set(), totalSpent: 0, orderCount: 0, lastOrder: o.createdAt };
+         customersMap[phone] = { phone: phone, name: String(o.customerName || ''), address: String(o.address || ''), methods: new Set(), paymentTypes: new Set(), totalSpent: 0, orderCount: 0, lastOrder: o.createdAt };
       }
       if(o.contactMethod) customersMap[phone].methods.add(o.contactMethod);
       if(o.paymentType) customersMap[phone].paymentTypes.add(o.paymentType);
@@ -756,13 +777,14 @@ export default function App() {
       customersMap[phone].orderCount += 1;
       if(new Date(o.createdAt) > new Date(customersMap[phone].lastOrder)) {
           customersMap[phone].lastOrder = o.createdAt;
-          customersMap[phone].name = o.customerName; 
-          customersMap[phone].address = o.address;
+          customersMap[phone].name = String(o.customerName || ''); 
+          customersMap[phone].address = String(o.address || '');
       }
     });
 
+    const sTerm = String(searchTerm).toLowerCase();
     const customersList = Object.values(customersMap)
-      .filter(c => c.name.includes(searchTerm) || c.phone.includes(searchTerm))
+      .filter(c => String(c.name).toLowerCase().includes(sTerm) || String(c.phone).toLowerCase().includes(sTerm))
       .sort((a,b) => b.totalSpent - a.totalSpent);
 
     return (
@@ -999,7 +1021,7 @@ export default function App() {
     const [addQty, setAddQty] = useState(1);
     const [sellForm, setSellForm] = useState({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
 
-    const filteredGoods = finishedGoods.filter(g => g.name.includes(searchTerm) || (g.code && g.code.includes(searchTerm)));
+    const filteredGoods = finishedGoods.filter(g => String(g.name || '').toLowerCase().includes(String(searchTerm).toLowerCase()) || (g.code && String(g.code).toLowerCase().includes(String(searchTerm).toLowerCase())));
 
     const handleUpload = async (e) => {
       const file = e.target.files[0];
@@ -1408,7 +1430,6 @@ export default function App() {
                        <button onClick={() => handleAdjustQty(item.id, item.quantity, 1, item.itemName)} className="bg-white hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-bold shadow-sm">+</button>
                        <button onClick={() => handleAdjustQty(item.id, item.quantity, -1, item.itemName)} className="bg-white hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-bold shadow-sm">-</button>
                      </div>
-                     {/* أزرار التعديل والحذف تظهر للمدير فقط */}
                      {isManagerOrAdmin && (
                        <>
                          <button onClick={() => handleEditInventory(item)} className="text-blue-600 hover:text-blue-800 p-1.5 bg-blue-50 rounded transition-colors" title="تعديل"><Edit size={16}/></button>
@@ -1453,7 +1474,6 @@ export default function App() {
                    });
                    return (
                    <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 relative group">
-                      {/* أزرار التعديل والحذف للمعادلات تظهر للمدير فقط */}
                       {isManagerOrAdmin && (
                          <div className="absolute top-2 left-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => handleEditRecipe(r)} className="bg-blue-50 text-blue-600 p-1.5 rounded hover:bg-blue-100" title="تعديل"><Edit size={16}/></button>
