@@ -200,6 +200,7 @@ const Countdown = ({ deliveryDate }) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [profilesLoaded, setProfilesLoaded] = useState(false); // قفل التزامن الجديد للحماية
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [zoomedImage, setZoomedImage] = useState(null);
@@ -237,7 +238,11 @@ export default function App() {
     if (!user) return;
     const dataPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
 
-    const unsubProfiles = onSnapshot(dataPath('profiles'), (snap) => setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubProfiles = onSnapshot(dataPath('profiles'), (snap) => {
+        setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setProfilesLoaded(true); // فتح القفل فقط بعد وصول البيانات لمنع الشاشة البيضاء
+    });
+    
     const unsubOrders = onSnapshot(dataPath('orders'), (snap) => {
         const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         fetchedOrders.sort((a, b) => {
@@ -267,7 +272,6 @@ export default function App() {
   const myProfile = profiles.find(p => p.uid === user?.uid);
   const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
-  // بناء الفئات ديناميكياً من الخلطات
   const dynamicCategories = React.useMemo(() => {
     const cats = {
       'قالب كيك ايطالي': ['ايطالي ١٢ قطعة', 'ايطالي ٨ قطعة'],
@@ -300,14 +304,12 @@ export default function App() {
 
   const hasAccess = (tabId) => {
     if (!myProfile) return false;
-    if (myProfile.role === 'admin') return true; // المدير دائماً يرى كل شيء
+    if (myProfile.role === 'admin') return true; 
     
-    // الصلاحيات المخصصة والدائمة (لن تتغير تلقائياً أبداً)
     if (myProfile.hasCustomPerms && Array.isArray(myProfile.customPermissions)) {
         return myProfile.customPermissions.includes(tabId);
     }
     
-    // الصلاحيات الافتراضية للرتبة إذا لم يحدد المدير صلاحيات مخصصة
     return defaultPermissions[myProfile.role]?.includes(tabId) || false;
   };
 
@@ -338,10 +340,18 @@ export default function App() {
   const handleJoin = async (e) => {
     e.preventDefault();
     if (!user || !joinName.trim()) return;
+    
+    // جدار الحماية ضد الثغرة: إذا كان هناك موظفين، يُمنع إنشاء حساب جديد من هنا!
     const isFirst = profiles.length === 0;
+    if (!isFirst) {
+       alert("⚠️ محاولة غير مصرح بها. النظام يمتلك مديراً بالفعل. سيتم تسجيل خروجك.");
+       signOut(auth);
+       return;
+    }
+
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', user.uid), {
       uid: user.uid, name: joinName.trim(), username: username.trim().toLowerCase().replace(/\s+/g, ''),
-      role: isFirst ? 'admin' : 'staff', createdAt: new Date().toISOString()
+      role: 'admin', createdAt: new Date().toISOString()
     });
   };
 
@@ -1291,9 +1301,11 @@ export default function App() {
     
     const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
     const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
-    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] });
+    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] });
     const [selectedMat, setSelectedMat] = useState('');
     const [selectedMatQty, setSelectedMatQty] = useState('');
+
+    const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
     const handleInventorySubmit = async (e) => {
       e.preventDefault();
@@ -1526,8 +1538,8 @@ export default function App() {
         {subTab === 'recipes' && (
            <>
              <div className="flex justify-between items-center mb-4">
-                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً، وأي فئة تُضاف هنا ستظهر تلقائياً للبيع في شاشة إدارة الطلبات.</p>
-                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
+                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً من المستودع عند بدء الإنتاج وحساب التكلفة الفعلية.</p>
+                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recipes.map(r => {
@@ -1645,7 +1657,7 @@ export default function App() {
                       <div key={idx} className="flex justify-between bg-white p-2 rounded border text-sm items-center">
                          <span className="font-medium text-gray-800">{m.itemName}</span>
                          <div className="flex items-center gap-3">
-                            <span className="font-bold text-gray-700">{m.qty} {m.unit}</span>
+                            <span className="font-bold text-blue-700">{m.qty} {m.unit}</span>
                             <button type="button" onClick={() => setRecipeForm({...recipeForm, materials: recipeForm.materials.filter((_, i) => i !== idx)})} className="text-red-500 hover:bg-red-50 p-1 rounded"><X size={16}/></button>
                          </div>
                       </div>
@@ -1699,6 +1711,7 @@ export default function App() {
     const filteredIncome = calcTotal(t => t.type === 'income');
     const filteredExpense = calcTotal(t => t.type === 'expense');
     
+    const plIncome = filteredIncome;
     const plOrders = orders.filter(o => {
        if (!o || o.status !== 'completed') return false;
        try {
@@ -1707,13 +1720,10 @@ export default function App() {
        } catch(e) {}
        return true;
     });
-
-    // ترتيب المربعات المحدث: إجمالي الإيرادات -> مصروفات عامة -> صافي الإيراد -> تكلفة البضاعة -> صافي الربح النهائي
-    const plIncome = filteredIncome; // إجمالي الإيرادات
-    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0); // تكلفة البضاعة المباعة
-    
-    const netRevenue = plIncome - filteredExpense; // صافي الإيراد
-    const finalNetProfit = netRevenue - plCogs; // صافي الربح النهائي
+    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0);
+    const plGrossProfit = plIncome - plCogs;
+    const plNetProfit = plGrossProfit - filteredExpense;
+    const plProfitMargin = plIncome > 0 ? ((plNetProfit / plIncome) * 100).toFixed(1) : 0;
 
     const driverCashOrders = orders.filter(o => o?.status === 'completed' && o?.paymentType === 'نقد' && o?.cashStatus === 'with_driver');
     const creditOrders = orders.filter(o => o?.paymentType === 'آجل' && o?.cashStatus === 'credit_unpaid');
@@ -1764,33 +1774,33 @@ export default function App() {
                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
                  <span className="text-gray-400">-</span>
                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
-                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, filteredExpense, netRevenue, finalNetProfit } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
+                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, plGrossProfit, filteredExpense, plNetProfit, plProfitMargin } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-blue-500"></div>
                     <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الإيرادات</p>
                     <p className="text-xl font-bold text-blue-700">{formatMoney(plIncome)} IQD</p>
                  </div>
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-1 h-full bg-red-500"></div>
-                    <p className="text-sm font-bold text-gray-500 mb-1">المصروفات العامة</p>
-                    <p className="text-xl font-bold text-red-700">{formatMoney(filteredExpense)} IQD</p>
-                 </div>
-                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-1 h-full bg-yellow-500"></div>
-                    <p className="text-sm font-bold text-gray-500 mb-1">صافي الإيراد</p>
-                    <p className="text-xl font-bold text-yellow-700">{formatMoney(netRevenue)} IQD</p>
-                 </div>
-                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-orange-500"></div>
                     <p className="text-sm font-bold text-gray-500 mb-1">تكلفة البضاعة المباعة</p>
                     <p className="text-xl font-bold text-orange-700">{formatMoney(plCogs)} IQD</p>
                  </div>
+                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-1 h-full bg-yellow-500"></div>
+                    <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الربح (المجمل)</p>
+                    <p className="text-xl font-bold text-yellow-700">{formatMoney(plGrossProfit)} IQD</p>
+                 </div>
                  <div className="bg-slate-800 p-5 rounded-xl shadow-md relative overflow-hidden">
                     <p className="text-sm font-bold text-slate-300 mb-1">صافي الربح النهائي</p>
-                    <p className={`text-xl font-bold ${finalNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatMoney(finalNetProfit)} IQD</p>
+                    <p className={`text-xl font-bold ${plNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatMoney(plNetProfit)} IQD</p>
+                    <p className="text-xs text-slate-400 mt-2">المصروفات: {formatMoney(filteredExpense)} IQD</p>
+                 </div>
+                 <div className="bg-green-600 p-5 rounded-xl shadow-md flex flex-col justify-center items-center text-white">
+                    <p className="text-sm font-bold text-green-200 mb-1">نسبة هامش الربح</p>
+                    <p className="text-3xl font-bold flex items-center">{plProfitMargin} <Percent size={24}/></p>
                  </div>
               </div>
            </div>
@@ -1885,7 +1895,6 @@ export default function App() {
   const AdminView = () => {
     const [isCreateModalOpen, setCreateModalOpen] = useState(false);
     const [permModal, setPermModal] = useState(null);
-    const [deleteUserModal, setDeleteUserModal] = useState(null);
     const [newEmp, setNewEmp] = useState({ name: '', username: '', password: '', role: 'staff' });
 
     const handleRoleChange = async (profileId, newRole) => {
@@ -1894,12 +1903,9 @@ export default function App() {
 
     const handleSavePermissions = async () => {
        if(!permModal) return;
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { 
-          customPermissions: permModal.perms,
-          hasCustomPerms: true 
-       });
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { customPermissions: permModal.perms, hasCustomPerms: true });
        setPermModal(null);
-       showNotification("تم تحديث وتثبيت صلاحيات الموظف بنجاح.");
+       showNotification("تم تحديث صلاحيات الموظف وتثبيتها بنجاح.");
     };
 
     const togglePerm = (tabId) => {
@@ -1909,11 +1915,11 @@ export default function App() {
        });
     };
 
-    const confirmDeleteUser = async () => {
-        if(!deleteUserModal) return;
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', deleteUserModal.id));
-        showNotification("تم حذف الموظف وإيقاف وصوله للنظام نهائياً.");
-        setDeleteUserModal(null);
+    const handleDeleteEmployee = async (profileId) => {
+       if(window.confirm('هل أنت متأكد من حذف هذا الموظف نهائياً؟')) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', profileId));
+          showNotification("تم حذف الموظف بنجاح.");
+       }
     };
 
     const handleCreateEmployee = async (e) => {
@@ -1925,13 +1931,15 @@ export default function App() {
         const secondaryAuth = getAuth(secondaryApp);
         
         await setPersistence(secondaryAuth, inMemoryPersistence);
+        
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, systemEmail, newEmp.password);
         const newUid = userCredential.user.uid;
+        
         await signOut(secondaryAuth);
         
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', newUid), {
           uid: newUid, name: newEmp.name, username: newEmp.username.trim().toLowerCase().replace(/\s+/g, ''),
-          role: newEmp.role, customPermissions: defaultPermissions[newEmp.role] || [], hasCustomPerms: false, createdAt: new Date().toISOString()
+          role: newEmp.role, hasCustomPerms: false, createdAt: new Date().toISOString()
         });
         
         setCreateModalOpen(false);
@@ -1948,43 +1956,32 @@ export default function App() {
     return (
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام والموظفين</h2></div>
+          <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام</h2></div>
           <button onClick={() => setCreateModalOpen(true)} className="bg-slate-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm w-full md:w-auto justify-center">
             <ShieldCheck size={20} /> إضافة موظف
           </button>
         </div>
-        <Table headers={['الاسم', 'اسم المستخدم', 'الرتبة', 'تخصيص الصلاحيات', 'حذف']}>
+        <Table headers={['الاسم', 'اسم المستخدم', 'الصلاحية', 'تخصيص', 'حذف']}>
           {profiles.map(p => (
              <tr key={p.id} className="hover:bg-gray-50">
                <td className="p-4 font-semibold text-gray-800">{p.name} {p.uid === user.uid && <span className="text-xs bg-amber-100 text-amber-800 px-2 rounded ml-2">أنت</span>}</td>
                <td className="p-4 text-sm text-gray-600 font-mono bg-gray-100 rounded px-2">{p.username}</td>
                <td className="p-4">
                   <select value={p.role} onChange={(e) => handleRoleChange(p.id, e.target.value)} disabled={p.uid === user.uid} className="p-2 border rounded-lg text-sm bg-white">
-                    <option value="admin">المدير العام</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
+                    <option value="admin">المدير</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
                   </select>
                </td>
                <td className="p-4">
-                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.hasCustomPerms ? p.customPermissions : (defaultPermissions[p.role] || []) })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> تعديل الوصول {p.hasCustomPerms && '🔒'}</button>
+                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.hasCustomPerms ? p.customPermissions : (defaultPermissions[p.role] || []) })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> {p.hasCustomPerms ? 'تعديل المخصص' : 'تخصيص'}</button>
                </td>
                <td className="p-4">
-                  <button onClick={() => setDeleteUserModal(p)} disabled={p.uid === user.uid} className="text-red-600 hover:text-red-800 p-2 bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={16}/></button>
+                  <button onClick={() => handleDeleteEmployee(p.id)} disabled={p.uid === user.uid} className="text-red-500 hover:bg-red-50 p-2 rounded disabled:opacity-50"><Trash2 size={18}/></button>
                </td>
              </tr>
           ))}
         </Table>
 
-        <Modal isOpen={!!deleteUserModal} onClose={() => setDeleteUserModal(null)} title="تأكيد طرد الموظف">
-          <div className="space-y-4">
-            <p className="text-gray-700 font-medium">هل أنت متأكد من رغبتك في حذف الموظف <span className="font-bold">({deleteUserModal?.name})</span> ومنعه من الدخول للنظام نهائياً؟</p>
-            <div className="bg-red-50 p-3 rounded text-sm text-red-800 border border-red-200 font-bold">ملاحظة لتغيير الباسورد: إذا نسي الموظف كلمة مروره، احذف حسابه من هنا، ثم قم بإنشاء حساب جديد له بنفس الاسم مع الباسورد الجديد.</div>
-            <div className="flex gap-3">
-              <button onClick={confirmDeleteUser} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors">نعم، احذف الموظف</button>
-              <button onClick={() => setDeleteUserModal(null)} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
-            </div>
-          </div>
-        </Modal>
-
-        <Modal isOpen={!!permModal} onClose={() => setPermModal(null)} title={`صلاحيات الوصول: ${permModal?.name}`}>
+        <Modal isOpen={!!permModal} onClose={() => setPermModal(null)} title={`تعديل صلاحيات الوصول: ${permModal?.name}`}>
            <div className="space-y-4">
               <p className="text-sm text-gray-600 mb-2">ضع علامة صح أمام الأقسام التي يُسمح لهذا الموظف برؤيتها والوصول إليها:</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
@@ -1995,7 +1992,7 @@ export default function App() {
                     </label>
                  ))}
               </div>
-              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ وتثبيت الصلاحيات</button>
+              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ الصلاحيات وتثبيتها</button>
            </div>
         </Modal>
 
@@ -2016,44 +2013,35 @@ export default function App() {
 
   // --- واجهات التحميل والدخول ---
 
-  if (authLoading) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري تحميل نظام المصنع...</h1></div></div>;
+  if (authLoading || (user && !profilesLoaded)) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري التحميل والمزامنة...</h1></div></div>;
 
   if (!user) {
-    let clickCount = 0;
-    const handleLogoClick = () => {
-       clickCount++;
-       if(clickCount >= 5) {
-           setIsSetupMode(!isSetupMode);
-           clickCount = 0;
-       }
-    };
-
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
         <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
           <div className="flex flex-col items-center justify-center mx-auto mb-6 mt-2">
-             <div className="text-center select-none" onClick={handleLogoClick}>
+             <div className="text-center select-none">
                  <span className="block text-3xl font-serif text-slate-800 tracking-wider font-bold mb-1 cursor-default">BASHEER</span>
                  <span className="block text-2xl font-serif text-slate-800 tracking-wider cursor-default">ALSHAKARCHY</span>
                  <div className="w-full h-1 bg-amber-500 mt-2 mb-2 rounded"></div>
                  <span className="block text-xs text-slate-600 tracking-widest font-semibold uppercase cursor-default">Sweets & Cake</span>
              </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">{isSetupMode ? 'إعداد حساب المدير السري' : 'تسجيل الدخول'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">تسجيل الدخول</h1>
           <p className="text-gray-500 mb-6 text-sm">الرجاء إدخال اسم المستخدم وكلمة المرور.</p>
           {authError && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm border border-red-200">{authError}</div>}
           <form onSubmit={handleAuth} className="space-y-4 text-right">
             <input type="text" required value={username} onChange={e => setUsername(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="اسم المستخدم" />
             <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="••••••••" minLength="6" />
-            <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">{isSetupMode ? 'إنشاء حساب المدير' : 'دخول'}</button>
+            <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">دخول</button>
           </form>
         </div>
       </div>
     );
   }
 
-  if (user && !myProfile) {
+  if (user && profilesLoaded && !myProfile) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100">
@@ -2222,7 +2210,7 @@ export default function App() {
              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">إجمالي الإيرادات</p><p className="font-bold text-lg text-blue-900">{formatMoney(printData.totals?.plIncome)} IQD</p></div>
              <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
              <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">المصروفات العامة</p><p className="font-bold text-lg text-red-900">{formatMoney(printData.totals?.filteredExpense)} IQD</p></div>
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.finalNetProfit)} IQD</p></div>
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.plNetProfit)} IQD</p><p className="text-[10px] text-green-700 mt-1">الهامش: {printData.totals?.plProfitMargin}%</p></div>
           </div>
           <h4 className="font-bold text-gray-800 mb-2">تفاصيل الحركات المالية (ضمن الفترة)</h4>
           <table className="w-full text-right border-collapse border border-gray-300">
