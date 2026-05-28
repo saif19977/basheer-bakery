@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
@@ -27,11 +27,11 @@ class ErrorBoundary extends React.Component {
       return (
         <div className="p-8 m-8 bg-red-50 border-2 border-red-500 rounded-xl text-right" dir="rtl">
           <h2 className="text-2xl font-bold text-red-700 mb-4">⚠️ عذراً، حدث خطأ برمجي في هذه الصفحة!</h2>
-          <p className="text-gray-700 mb-2">يرجى نسخ رسالة الخطأ أدناه وإرسالها للمبرمج لحلها فوراً:</p>
+          <p className="text-gray-700 mb-2">تم منع انهيار النظام بالكامل. يرجى إرسال الخطأ أدناه للمبرمج:</p>
           <div className="bg-white p-4 rounded border border-red-200 text-left dir-ltr font-mono text-sm text-red-600 overflow-auto">
             {this.state.errorInfo}
           </div>
-          <button onClick={() => window.location.reload()} className="mt-4 bg-red-600 text-white px-4 py-2 rounded font-bold">إعادة تحميل النظام</button>
+          <button onClick={() => window.location.reload()} className="mt-4 bg-red-600 text-white px-4 py-2 rounded font-bold">تحديث الصفحة</button>
         </div>
       );
     }
@@ -55,50 +55,16 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'cakeshop-production';
 
-// --- المكونات المشتركة ودوال المساعدة ---
+// --- دوال الحماية والمساعدة ---
+
+// دالة حماية النصوص لمنع الشاشة البيضاء عند البحث
+const safeStr = (val) => {
+  if (val === null || val === undefined) return '';
+  return String(val).toLowerCase().trim();
+};
+
 const formatMoney = (amount) => {
   return Math.round(Number(amount || 0)).toLocaleString('en-US');
-};
-
-const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" dir="rtl">
-      <div className={`bg-white rounded-xl shadow-2xl w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden`}>
-        <div className="flex justify-between items-center p-5 border-b bg-gray-50">
-          <h2 className="text-xl font-bold text-gray-800">{title}</h2>
-          <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-800 transition-colors"><X size={24} /></button>
-        </div>
-        <div className="p-5 overflow-y-auto custom-scrollbar">{children}</div>
-      </div>
-    </div>
-  );
-};
-
-const StatCard = ({ title, value, icon: Icon, colorClass, onClick, subtitle }) => (
-  <div onClick={onClick} className={`bg-white p-6 rounded-xl border border-gray-100 flex items-center gap-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow hover:border-amber-200' : 'shadow-sm'}`}>
-    <div className={`p-4 rounded-lg flex-shrink-0 ${colorClass}`}><Icon size={28} /></div>
-    <div>
-       <p className="text-sm font-medium text-gray-500">{title}</p>
-       <h3 className="text-2xl font-bold text-gray-900">{value}</h3>
-       {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
-    </div>
-  </div>
-);
-
-const Table = ({ headers, children }) => (
-  <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-100 w-full">
-    <table className="w-full text-right border-collapse min-w-[600px]">
-      <thead><tr className="bg-gray-50 border-b border-gray-100">{headers.map((h, i) => <th key={i} className="p-4 font-semibold text-gray-600 text-sm whitespace-nowrap">{h}</th>)}</tr></thead>
-      <tbody className="divide-y divide-gray-100">{children}</tbody>
-    </table>
-  </div>
-);
-
-const StatusBadge = ({ status }) => {
-  const styles = { pending: 'bg-yellow-100 text-yellow-800', baking: 'bg-orange-100 text-orange-800', ready: 'bg-blue-100 text-blue-800', out_for_delivery: 'bg-purple-100 text-purple-800', completed: 'bg-green-100 text-green-800', cancelled: 'bg-red-100 text-red-800' };
-  const labels = { pending: 'بانتظار التحضير', baking: 'جاري التحضير', ready: 'تم التجهيز', out_for_delivery: 'في الطريق', completed: 'مكتمل', cancelled: 'ملغي' };
-  return <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>{labels[status] || status}</span>;
 };
 
 const formatDate = (dateStr) => {
@@ -151,6 +117,48 @@ const getOrderItems = (order) => {
   }];
 };
 
+// --- المكونات المرئية المشتركة ---
+const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" dir="rtl">
+      <div className={`bg-white rounded-xl shadow-2xl w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden`}>
+        <div className="flex justify-between items-center p-5 border-b bg-gray-50">
+          <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+          <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-800 transition-colors"><X size={24} /></button>
+        </div>
+        <div className="p-5 overflow-y-auto custom-scrollbar">{children}</div>
+      </div>
+    </div>
+  );
+};
+
+const StatCard = ({ title, value, icon: Icon, colorClass, onClick, subtitle }) => (
+  <div onClick={onClick} className={`bg-white p-6 rounded-xl border border-gray-100 flex items-center gap-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow hover:border-amber-200' : 'shadow-sm'}`}>
+    <div className={`p-4 rounded-lg flex-shrink-0 ${colorClass}`}><Icon size={28} /></div>
+    <div>
+       <p className="text-sm font-medium text-gray-500">{title}</p>
+       <h3 className="text-2xl font-bold text-gray-900">{value}</h3>
+       {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
+    </div>
+  </div>
+);
+
+const Table = ({ headers, children }) => (
+  <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-100 w-full">
+    <table className="w-full text-right border-collapse min-w-[600px]">
+      <thead><tr className="bg-gray-50 border-b border-gray-100">{headers.map((h, i) => <th key={i} className="p-4 font-semibold text-gray-600 text-sm whitespace-nowrap">{h}</th>)}</tr></thead>
+      <tbody className="divide-y divide-gray-100">{children}</tbody>
+    </table>
+  </div>
+);
+
+const StatusBadge = ({ status }) => {
+  const styles = { pending: 'bg-yellow-100 text-yellow-800', baking: 'bg-orange-100 text-orange-800', ready: 'bg-blue-100 text-blue-800', out_for_delivery: 'bg-purple-100 text-purple-800', completed: 'bg-green-100 text-green-800', cancelled: 'bg-red-100 text-red-800' };
+  const labels = { pending: 'بانتظار التحضير', baking: 'جاري التحضير', ready: 'تم التجهيز', out_for_delivery: 'في الطريق', completed: 'مكتمل', cancelled: 'ملغي' };
+  return <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>{labels[status] || status}</span>;
+};
+
 const Countdown = ({ deliveryDate }) => {
   const [timeLeft, setTimeLeft] = useState('');
   const [isLate, setIsLate] = useState(false);
@@ -200,10 +208,11 @@ const Countdown = ({ deliveryDate }) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [profilesLoaded, setProfilesLoaded] = useState(false); // قفل التزامن الجديد للحماية
+  const [profilesLoaded, setProfilesLoaded] = useState(false); // قفل التزامن للحماية
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [zoomedImage, setZoomedImage] = useState(null);
+  const [isPrinting, setIsPrinting] = useState(false); // حالة الطباعة لتسريع الاستجابة
   
   const [profiles, setProfiles] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -235,14 +244,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+       setProfilesLoaded(true);
+       return;
+    }
     const dataPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
 
     const unsubProfiles = onSnapshot(dataPath('profiles'), (snap) => {
-        setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setProfilesLoaded(true); // فتح القفل فقط بعد وصول البيانات لمنع الشاشة البيضاء
+       setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+       setProfilesLoaded(true);
     });
-    
+
     const unsubOrders = onSnapshot(dataPath('orders'), (snap) => {
         const fetchedOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         fetchedOrders.sort((a, b) => {
@@ -252,6 +264,7 @@ export default function App() {
         prevOrderCount.current = fetchedOrders.length;
         setOrders(fetchedOrders);
     });
+
     const unsubInventory = onSnapshot(dataPath('inventory'), (snap) => setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubInvLogs = onSnapshot(dataPath('inventory_logs'), (snap) => setInventoryLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => {
        try { return new Date(b.date).getTime() - new Date(a.date).getTime(); } catch(e) { return 0; }
@@ -272,7 +285,8 @@ export default function App() {
   const myProfile = profiles.find(p => p.uid === user?.uid);
   const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
-  const dynamicCategories = React.useMemo(() => {
+  // بناء الفئات ديناميكياً من الخلطات - طلب المستخدم 
+  const dynamicCategories = useMemo(() => {
     const cats = {
       'قالب كيك ايطالي': ['ايطالي ١٢ قطعة', 'ايطالي ٨ قطعة'],
       'قالب كيك عالي': ['صغير عالي', 'وسط عالي', 'كبير عالي'],
@@ -304,24 +318,22 @@ export default function App() {
 
   const hasAccess = (tabId) => {
     if (!myProfile) return false;
-    if (myProfile.role === 'admin') return true; 
-    
-    if (myProfile.hasCustomPerms && Array.isArray(myProfile.customPermissions)) {
+    if (myProfile.role === 'admin') return true;
+    if (myProfile.customPermissions && Array.isArray(myProfile.customPermissions)) {
         return myProfile.customPermissions.includes(tabId);
     }
-    
     return defaultPermissions[myProfile.role]?.includes(tabId) || false;
   };
 
   useEffect(() => {
-    if (myProfile) {
+    if (myProfile && profilesLoaded) {
        const canAccessCurrent = hasAccess(activeTab);
        if (!canAccessCurrent) {
           const firstAllowed = TABS.find(t => hasAccess(t.id));
           if (firstAllowed) setActiveTab(firstAllowed.id);
        }
     }
-  }, [myProfile, activeTab]);
+  }, [myProfile, activeTab, profilesLoaded]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -341,11 +353,12 @@ export default function App() {
     e.preventDefault();
     if (!user || !joinName.trim()) return;
     
-    // جدار الحماية ضد الثغرة: إذا كان هناك موظفين، يُمنع إنشاء حساب جديد من هنا!
+    // حماية ضد استغلال ثغرة التسجيل
+    const adminExists = profiles.some(p => p.role === 'admin');
     const isFirst = profiles.length === 0;
-    if (!isFirst) {
-       alert("⚠️ محاولة غير مصرح بها. النظام يمتلك مديراً بالفعل. سيتم تسجيل خروجك.");
-       signOut(auth);
+
+    if (adminExists && !isFirst) {
+       showNotification("❌ لا يمكنك إكمال التسجيل. يرجى مراجعة المدير لإنشاء حساب لك.");
        return;
     }
 
@@ -353,6 +366,15 @@ export default function App() {
       uid: user.uid, name: joinName.trim(), username: username.trim().toLowerCase().replace(/\s+/g, ''),
       role: 'admin', createdAt: new Date().toISOString()
     });
+  };
+
+  // دالة ذكية لتسريع الطباعة
+  const handlePrintAction = () => {
+     setIsPrinting(true);
+     setTimeout(() => {
+        window.print();
+        setIsPrinting(false);
+     }, 500); // إعطاء نصف ثانية للمتصفح لتحميل الصور وترتيب الألوان قبل فتح نافذة الطباعة
   };
 
   const TABS = [
@@ -437,10 +459,10 @@ export default function App() {
 
     const filteredOrders = orders.filter(o => {
       if (!o) return false;
-      const s = String(searchTerm || '').toLowerCase();
-      const num = String(formatOrderNum(o)).toLowerCase();
-      const name = String(o.customerName || '').toLowerCase();
-      const phone = String(o.phone || '').toLowerCase();
+      const s = safeStr(searchTerm);
+      const num = safeStr(formatOrderNum(o));
+      const name = safeStr(o.customerName);
+      const phone = safeStr(o.phone);
       
       const matchesSearch = name.includes(s) || phone.includes(s) || num.includes(s);
       if (!matchesSearch) return false;
@@ -833,9 +855,9 @@ export default function App() {
     const customersMap = {};
     orders.forEach(o => {
       if(!o || o.status === 'cancelled') return;
-      const phone = String(o.phone || '').trim() || 'بدون رقم';
+      const phone = safeStr(o.phone) || 'بدون رقم';
       if(!customersMap[phone]) {
-         customersMap[phone] = { phone: phone, name: String(o.customerName || ''), address: String(o.address || ''), methods: new Set(), paymentTypes: new Set(), totalSpent: 0, orderCount: 0, lastOrder: o.createdAt };
+         customersMap[phone] = { phone: o.phone || '-', name: o.customerName || '', address: o.address || '', methods: new Set(), paymentTypes: new Set(), totalSpent: 0, orderCount: 0, lastOrder: o.createdAt };
       }
       if(o.contactMethod) customersMap[phone].methods.add(o.contactMethod);
       if(o.paymentType) customersMap[phone].paymentTypes.add(o.paymentType);
@@ -843,14 +865,14 @@ export default function App() {
       customersMap[phone].orderCount += 1;
       if(new Date(o.createdAt || 0) > new Date(customersMap[phone].lastOrder)) {
           customersMap[phone].lastOrder = o.createdAt;
-          customersMap[phone].name = String(o.customerName || ''); 
-          customersMap[phone].address = String(o.address || '');
+          customersMap[phone].name = o.customerName || ''; 
+          customersMap[phone].address = o.address || '';
       }
     });
 
-    const sTerm = String(searchTerm).toLowerCase();
+    const sTerm = safeStr(searchTerm);
     const customersList = Object.values(customersMap)
-      .filter(c => String(c.name).toLowerCase().includes(sTerm) || String(c.phone).toLowerCase().includes(sTerm))
+      .filter(c => safeStr(c.name).includes(sTerm) || safeStr(c.phone).includes(sTerm))
       .sort((a,b) => b.totalSpent - a.totalSpent);
 
     return (
@@ -1087,7 +1109,7 @@ export default function App() {
     const [addQty, setAddQty] = useState(1);
     const [sellForm, setSellForm] = useState({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
 
-    const filteredGoods = finishedGoods.filter(g => String(g?.name || '').toLowerCase().includes(String(searchTerm).toLowerCase()) || (g?.code && String(g.code).toLowerCase().includes(String(searchTerm).toLowerCase())));
+    const filteredGoods = finishedGoods.filter(g => safeStr(g.name).includes(safeStr(searchTerm)) || safeStr(g.code).includes(safeStr(searchTerm)));
 
     const handleUpload = async (e) => {
       const file = e.target.files[0];
@@ -1160,7 +1182,8 @@ export default function App() {
         const receiptData = {
           ...baseOrderData, id: 'DIR-' + Date.now().toString().slice(-6),
           customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد', contactMethod: 'مباشر',
-          status: 'completed', completedAt: now, printType: 'receipt', cashStatus: sellForm.paymentType === 'نقد' ? 'received_by_finance' : 'credit_unpaid'
+          status: 'completed', completedAt: now, printType: 'receipt', cashStatus: sellForm.paymentType === 'نقد' ? 'received_by_finance' : 'credit_unpaid',
+          receivedByUid: user.uid, receivedByName: myProfile?.name || 'غير معروف' // تسجيل المستلم
         };
 
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
@@ -1291,6 +1314,246 @@ export default function App() {
     );
   };
 
+  const DeliveryView = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [viewMode, setViewMode] = useState('active');
+    const [selectedOrder, setSelectedOrder] = useState(null);
+
+    const activeDeliveries = orders.filter(o => o && ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status));
+    const historyDeliveries = orders.filter(o => o?.status === 'completed');
+
+    const displayedOrders = (viewMode === 'active' ? activeDeliveries : historyDeliveries).filter(o => {
+      if (!o) return false;
+      const sTerm = safeStr(searchTerm);
+      const orderSearchNum = safeStr(formatOrderNum(o));
+      const nameStr = safeStr(o.customerName);
+      const phoneStr = safeStr(o.phone);
+      const addressStr = safeStr(o.address);
+      return nameStr.includes(sTerm) || phoneStr.includes(sTerm) || addressStr.includes(sTerm) || orderSearchNum.includes(sTerm);
+    });
+
+    const handleDispatch = async (order) => {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
+      setSelectedOrder(null);
+    };
+
+    const handleDelivered = async (order) => {
+      const now = new Date().toISOString();
+      const updateData = { 
+         status: 'completed', 
+         completedAt: now,
+         receivedByUid: user.uid,
+         receivedByName: myProfile?.name || 'غير معروف' // تسجيل المستلم
+      };
+      
+      if (order.paymentType === 'نقد' || !order.paymentType) {
+         updateData.cashStatus = 'with_driver'; 
+         showNotification("تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.");
+      } else {
+         updateData.cashStatus = 'credit_unpaid';
+         showNotification("تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.");
+      }
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
+      setSelectedOrder(null);
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-gray-800">التوصيل والشحن</h2>
+          <div className="relative w-full md:w-64"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم، الهاتف، الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setViewMode('active')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'active' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الطلبات الحالية</button>
+          <button onClick={() => setViewMode('history')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'history' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>السجل العام</button>
+        </div>
+
+        {viewMode === 'active' ? (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Clock size={18} className="text-yellow-500"/> قيد التحضير في المعمل (للتنسيق المسبق مع الزبون)</h3>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).map(o => (
+                     <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-yellow-200 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 transition-colors flex flex-col text-right">
+                        <span className="font-mono text-xs text-yellow-600 font-bold mb-1">#{formatOrderNum(o)}</span>
+                        <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                        <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                        <div className="mt-auto pt-2 flex justify-between items-center">
+                           <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                           <Countdown deliveryDate={o.deliveryDate} />
+                        </div>
+                     </div>
+                  ))}
+                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات في المعمل حالياً.</p>}
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {displayedOrders.filter(o => o.status === 'ready').map(o => (
+                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
+                      <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                      <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                      <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                      <div className="mt-auto pt-2 flex justify-between items-center">
+                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                         <Countdown deliveryDate={o.deliveryDate} />
+                      </div>
+                    </div>
+                  ))}
+                  {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات جاهزة للشحن.</p>}
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
+                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
+                       <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                       <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                       <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                       <div className="mt-auto pt-2 flex justify-between items-center">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                          <Countdown deliveryDate={o.deliveryDate} />
+                       </div>
+                    </div>
+                  ))}
+                   {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Table headers={['رقم الطلب', 'العميل', 'الهاتف', 'الدفع', 'تاريخ التسليم', 'الفاتورة']}>
+            {displayedOrders.map(o => (
+              <tr key={o.id} className="hover:bg-gray-50">
+                <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+                <td className="p-4 font-medium">
+                   {o.customerName || 'غير محدد'}
+                   {o.receivedByName && <div className="text-[10px] text-gray-500 mt-1">المستلم: {o.receivedByName}</div>}
+                </td>
+                <td className="p-4 dir-ltr text-right text-sm font-mono">{o.phone || '-'}</td>
+                <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
+                <td className="p-4 text-sm text-gray-500">{formatDate(o.completedAt)}</td>
+                <td className="p-4"><button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors"><Printer size={16} /></button></td>
+              </tr>
+            ))}
+          </Table>
+        )}
+
+        <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} />
+      </div>
+    );
+  };
+
+  const SalesView = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
+    const completed = orders.filter(o => {
+      if (!o || o.status !== 'completed') return false;
+      const s = safeStr(searchTerm);
+      const searchNum = safeStr(formatOrderNum(o));
+      const nameStr = safeStr(o.customerName);
+      
+      if (s && !nameStr.includes(s) && !searchNum.includes(s)) return false;
+      
+      if (startDate || endDate) {
+        try {
+           const dTime = new Date(o.completedAt || o.createdAt).getTime();
+           if (startDate && dTime < new Date(startDate).getTime()) return false;
+           if (endDate && dTime > new Date(endDate + 'T23:59:59').getTime()) return false;
+        } catch(e) {}
+      }
+      return true;
+    });
+    
+    const monthlyData = {};
+    completed.forEach(o => {
+      let monthYear = 'غير محدد';
+      try {
+         const dateToUse = o.completedAt || o.createdAt;
+         if (dateToUse) {
+            const d = new Date(dateToUse);
+            if (!isNaN(d.getTime())) {
+               const y = d.getFullYear();
+               const m = String(d.getMonth() + 1).padStart(2, '0');
+               monthYear = `${y}-${m}`;
+            }
+         }
+      } catch(e) {}
+
+      if (!monthlyData[monthYear]) monthlyData[monthYear] = { count: 0, revenue: 0 };
+      monthlyData[monthYear].count += 1;
+      monthlyData[monthYear].revenue += Number(o.price || 0);
+    });
+
+    const totalSales = completed.reduce((sum, o) => sum + Number(o.price || 0), 0);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-gray-800">سجل المبيعات</h2>
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-48"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم أو الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm" /></div>
+            <div className="flex items-center gap-2">
+               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="من تاريخ" />
+               <span className="text-gray-400">-</span>
+               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="إلى تاريخ" />
+            </div>
+            <button onClick={() => setPrintData({ printType: 'sales_report', data: completed, startDate, endDate, totalSales })} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors whitespace-nowrap"><Printer size={18} /> طباعة التقرير</button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <StatCard title="الطلبات المكتملة ضمن البحث" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
+          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${formatMoney(totalSales)} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
+        </div>
+        
+        <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية ضمن البحث</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+          {Object.entries(monthlyData).sort().reverse().map(([month, data]) => (
+            <div key={month} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-1 h-full bg-amber-500"></div>
+              <h4 className="font-bold text-gray-700 mb-2 dir-ltr text-right">{month}</h4>
+              <p className="text-sm text-gray-500 mb-1">الطلبات: <span className="font-bold text-gray-700">{data.count}</span></p>
+              <p className="text-xl font-bold text-green-600 mt-2">{formatMoney(data.revenue)} IQD</p>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">التفاصيل والأرباح لكل طلب</h3>
+        <Table headers={['رقم الطلب', 'تاريخ الاكتمال', 'العميل والمستلم', 'المبلغ المستلم', 'التكلفة (COGS)', 'صافي ربح الطلب']}>
+          {completed.map(o => {
+            const price = Number(o?.price || 0);
+            const cogs = Number(o?.cogs || 0);
+            const profit = price - cogs;
+            const margin = price > 0 ? ((profit / price) * 100).toFixed(1) : 0;
+            return (
+             <tr key={o.id} className="hover:bg-gray-50">
+               <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+               <td className="p-4 text-xs text-gray-500">{formatDate(o.completedAt || o.createdAt)}</td>
+               <td className="p-4">
+                  <p className="font-medium text-sm">{o.customerName || 'غير محدد'}</p>
+                  {o.receivedByName && <span className="text-[10px] text-gray-500 bg-gray-100 px-1 rounded border">المستلم: {o.receivedByName}</span>}
+               </td>
+               <td className="p-4 font-semibold text-green-700">{formatMoney(price)} IQD</td>
+               <td className="p-4 font-semibold text-orange-700">{formatMoney(cogs)} IQD</td>
+               <td className="p-4 font-bold text-blue-700">{formatMoney(profit)} IQD <span className="text-xs text-gray-500 font-normal">({margin}%)</span></td>
+             </tr>
+          )})}
+          {completed.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبيعات مطابقة لبحثك.</td></tr>}
+        </Table>
+      </div>
+    );
+  };
+
   const StoreView = () => {
     const [subTab, setSubTab] = useState('inventory'); // inventory, logs, recipes
     const [isModalOpen, setModalOpen] = useState(false);
@@ -1301,11 +1564,9 @@ export default function App() {
     
     const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
     const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
-    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] });
+    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] });
     const [selectedMat, setSelectedMat] = useState('');
     const [selectedMatQty, setSelectedMatQty] = useState('');
-
-    const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
     const handleInventorySubmit = async (e) => {
       e.preventDefault();
@@ -1538,8 +1799,8 @@ export default function App() {
         {subTab === 'recipes' && (
            <>
              <div className="flex justify-between items-center mb-4">
-                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً من المستودع عند بدء الإنتاج وحساب التكلفة الفعلية.</p>
-                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
+                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً، وأي فئة تُضاف هنا ستظهر تلقائياً للبيع في شاشة إدارة الطلبات.</p>
+                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recipes.map(r => {
@@ -1701,8 +1962,8 @@ export default function App() {
        if (!t) return false;
        if (filterCategory !== 'all' && t.category !== filterCategory) return false;
        try {
-         if (startDate && new Date(t.date || 0) < new Date(startDate)) return false;
-         if (endDate && new Date(t.date || 0) > new Date(endDate + 'T23:59:59')) return false;
+         if (startDate && new Date(t.date || 0).getTime() < new Date(startDate).getTime()) return false;
+         if (endDate && new Date(t.date || 0).getTime() > new Date(endDate + 'T23:59:59').getTime()) return false;
        } catch(e) {}
        return true;
     });
@@ -1711,19 +1972,19 @@ export default function App() {
     const filteredIncome = calcTotal(t => t.type === 'income');
     const filteredExpense = calcTotal(t => t.type === 'expense');
     
-    const plIncome = filteredIncome;
     const plOrders = orders.filter(o => {
        if (!o || o.status !== 'completed') return false;
        try {
-         if (startDate && new Date(o.completedAt || 0) < new Date(startDate)) return false;
-         if (endDate && new Date(o.completedAt || 0) > new Date(endDate + 'T23:59:59')) return false;
+         if (startDate && new Date(o.completedAt || 0).getTime() < new Date(startDate).getTime()) return false;
+         if (endDate && new Date(o.completedAt || 0).getTime() > new Date(endDate + 'T23:59:59').getTime()) return false;
        } catch(e) {}
        return true;
     });
-    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0);
-    const plGrossProfit = plIncome - plCogs;
-    const plNetProfit = plGrossProfit - filteredExpense;
-    const plProfitMargin = plIncome > 0 ? ((plNetProfit / plIncome) * 100).toFixed(1) : 0;
+
+    const plIncome = filteredIncome; 
+    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0); 
+    const netRevenue = plIncome - filteredExpense; 
+    const finalNetProfit = netRevenue - plCogs; 
 
     const driverCashOrders = orders.filter(o => o?.status === 'completed' && o?.paymentType === 'نقد' && o?.cashStatus === 'with_driver');
     const creditOrders = orders.filter(o => o?.paymentType === 'آجل' && o?.cashStatus === 'credit_unpaid');
@@ -1737,7 +1998,11 @@ export default function App() {
 
     const confirmDriverCash = async (order) => {
        const now = new Date().toISOString();
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { cashStatus: 'received_by_finance' });
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+          cashStatus: 'received_by_finance',
+          receivedByUid: user.uid,
+          receivedByName: myProfile?.name || 'غير معروف'
+       });
        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
           category: 'revenue', type: 'income', amount: Number(order.price), description: `تحصيل نقدية مندوب لطلب: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
        });
@@ -1746,7 +2011,11 @@ export default function App() {
 
     const confirmCreditPayment = async (order) => {
        const now = new Date().toISOString();
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { cashStatus: 'received_by_finance' });
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+          cashStatus: 'received_by_finance',
+          receivedByUid: user.uid,
+          receivedByName: myProfile?.name || 'غير معروف'
+       });
        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
           category: 'revenue', type: 'income', amount: Number(order.price), description: `سداد دين طلب آجل: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
        });
@@ -1774,33 +2043,33 @@ export default function App() {
                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
                  <span className="text-gray-400">-</span>
                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
-                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, plGrossProfit, filteredExpense, plNetProfit, plProfitMargin } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
+                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, filteredExpense, netRevenue, finalNetProfit } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-blue-500"></div>
                     <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الإيرادات</p>
                     <p className="text-xl font-bold text-blue-700">{formatMoney(plIncome)} IQD</p>
                  </div>
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-1 h-full bg-red-500"></div>
+                    <p className="text-sm font-bold text-gray-500 mb-1">المصروفات العامة</p>
+                    <p className="text-xl font-bold text-red-700">{formatMoney(filteredExpense)} IQD</p>
+                 </div>
+                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-1 h-full bg-yellow-500"></div>
+                    <p className="text-sm font-bold text-gray-500 mb-1">صافي الإيراد</p>
+                    <p className="text-xl font-bold text-yellow-700">{formatMoney(netRevenue)} IQD</p>
+                 </div>
+                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-orange-500"></div>
                     <p className="text-sm font-bold text-gray-500 mb-1">تكلفة البضاعة المباعة</p>
                     <p className="text-xl font-bold text-orange-700">{formatMoney(plCogs)} IQD</p>
                  </div>
-                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-1 h-full bg-yellow-500"></div>
-                    <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الربح (المجمل)</p>
-                    <p className="text-xl font-bold text-yellow-700">{formatMoney(plGrossProfit)} IQD</p>
-                 </div>
                  <div className="bg-slate-800 p-5 rounded-xl shadow-md relative overflow-hidden">
                     <p className="text-sm font-bold text-slate-300 mb-1">صافي الربح النهائي</p>
-                    <p className={`text-xl font-bold ${plNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatMoney(plNetProfit)} IQD</p>
-                    <p className="text-xs text-slate-400 mt-2">المصروفات: {formatMoney(filteredExpense)} IQD</p>
-                 </div>
-                 <div className="bg-green-600 p-5 rounded-xl shadow-md flex flex-col justify-center items-center text-white">
-                    <p className="text-sm font-bold text-green-200 mb-1">نسبة هامش الربح</p>
-                    <p className="text-3xl font-bold flex items-center">{plProfitMargin} <Percent size={24}/></p>
+                    <p className={`text-xl font-bold ${finalNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatMoney(finalNetProfit)} IQD</p>
                  </div>
               </div>
            </div>
@@ -1903,9 +2172,9 @@ export default function App() {
 
     const handleSavePermissions = async () => {
        if(!permModal) return;
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { customPermissions: permModal.perms, hasCustomPerms: true });
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { customPermissions: permModal.perms });
        setPermModal(null);
-       showNotification("تم تحديث صلاحيات الموظف وتثبيتها بنجاح.");
+       showNotification("تم تحديث صلاحيات الموظف بنجاح.");
     };
 
     const togglePerm = (tabId) => {
@@ -1916,7 +2185,7 @@ export default function App() {
     };
 
     const handleDeleteEmployee = async (profileId) => {
-       if(window.confirm('هل أنت متأكد من حذف هذا الموظف نهائياً؟')) {
+       if(window.confirm("هل أنت متأكد من حذف هذا الموظف نهائياً؟")) {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', profileId));
           showNotification("تم حذف الموظف بنجاح.");
        }
@@ -1931,15 +2200,13 @@ export default function App() {
         const secondaryAuth = getAuth(secondaryApp);
         
         await setPersistence(secondaryAuth, inMemoryPersistence);
-        
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, systemEmail, newEmp.password);
         const newUid = userCredential.user.uid;
-        
         await signOut(secondaryAuth);
         
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', newUid), {
           uid: newUid, name: newEmp.name, username: newEmp.username.trim().toLowerCase().replace(/\s+/g, ''),
-          role: newEmp.role, hasCustomPerms: false, createdAt: new Date().toISOString()
+          role: newEmp.role, customPermissions: defaultPermissions[newEmp.role] || [], createdAt: new Date().toISOString()
         });
         
         setCreateModalOpen(false);
@@ -1956,26 +2223,25 @@ export default function App() {
     return (
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام</h2></div>
+          <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام والموظفين</h2></div>
           <button onClick={() => setCreateModalOpen(true)} className="bg-slate-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm w-full md:w-auto justify-center">
             <ShieldCheck size={20} /> إضافة موظف
           </button>
         </div>
-        <Table headers={['الاسم', 'اسم المستخدم', 'الصلاحية', 'تخصيص', 'حذف']}>
+        <Table headers={['الاسم', 'اسم المستخدم', 'الرتبة', 'تاريخ الانضمام', 'إدارة الحساب']}>
           {profiles.map(p => (
              <tr key={p.id} className="hover:bg-gray-50">
                <td className="p-4 font-semibold text-gray-800">{p.name} {p.uid === user.uid && <span className="text-xs bg-amber-100 text-amber-800 px-2 rounded ml-2">أنت</span>}</td>
                <td className="p-4 text-sm text-gray-600 font-mono bg-gray-100 rounded px-2">{p.username}</td>
                <td className="p-4">
                   <select value={p.role} onChange={(e) => handleRoleChange(p.id, e.target.value)} disabled={p.uid === user.uid} className="p-2 border rounded-lg text-sm bg-white">
-                    <option value="admin">المدير</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
+                    <option value="admin">المدير العام</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
                   </select>
                </td>
-               <td className="p-4">
-                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.hasCustomPerms ? p.customPermissions : (defaultPermissions[p.role] || []) })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> {p.hasCustomPerms ? 'تعديل المخصص' : 'تخصيص'}</button>
-               </td>
-               <td className="p-4">
-                  <button onClick={() => handleDeleteEmployee(p.id)} disabled={p.uid === user.uid} className="text-red-500 hover:bg-red-50 p-2 rounded disabled:opacity-50"><Trash2 size={18}/></button>
+               <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
+               <td className="p-4 flex gap-2">
+                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.customPermissions || defaultPermissions[p.role] || [] })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> الصلاحيات</button>
+                  <button onClick={() => handleDeleteEmployee(p.id)} disabled={p.uid === user.uid} className="text-xs bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Trash2 size={14}/> حذف</button>
                </td>
              </tr>
           ))}
@@ -1992,7 +2258,7 @@ export default function App() {
                     </label>
                  ))}
               </div>
-              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ الصلاحيات وتثبيتها</button>
+              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ الصلاحيات الجديدة</button>
            </div>
         </Modal>
 
@@ -2013,35 +2279,44 @@ export default function App() {
 
   // --- واجهات التحميل والدخول ---
 
-  if (authLoading || (user && !profilesLoaded)) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري التحميل والمزامنة...</h1></div></div>;
+  if (authLoading || !profilesLoaded) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري تحميل وتأمين النظام...</h1></div></div>;
 
   if (!user) {
+    let clickCount = 0;
+    const handleLogoClick = () => {
+       clickCount++;
+       if(clickCount >= 5) {
+           setIsSetupMode(!isSetupMode);
+           clickCount = 0;
+       }
+    };
+
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
         <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
           <div className="flex flex-col items-center justify-center mx-auto mb-6 mt-2">
-             <div className="text-center select-none">
+             <div className="text-center select-none" onClick={handleLogoClick}>
                  <span className="block text-3xl font-serif text-slate-800 tracking-wider font-bold mb-1 cursor-default">BASHEER</span>
                  <span className="block text-2xl font-serif text-slate-800 tracking-wider cursor-default">ALSHAKARCHY</span>
                  <div className="w-full h-1 bg-amber-500 mt-2 mb-2 rounded"></div>
                  <span className="block text-xs text-slate-600 tracking-widest font-semibold uppercase cursor-default">Sweets & Cake</span>
              </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">تسجيل الدخول</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{isSetupMode ? 'إعداد حساب المدير السري' : 'تسجيل الدخول'}</h1>
           <p className="text-gray-500 mb-6 text-sm">الرجاء إدخال اسم المستخدم وكلمة المرور.</p>
           {authError && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm border border-red-200">{authError}</div>}
           <form onSubmit={handleAuth} className="space-y-4 text-right">
             <input type="text" required value={username} onChange={e => setUsername(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="اسم المستخدم" />
             <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="••••••••" minLength="6" />
-            <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">دخول</button>
+            <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">{isSetupMode ? 'إنشاء حساب المدير' : 'دخول'}</button>
           </form>
         </div>
       </div>
     );
   }
 
-  if (user && profilesLoaded && !myProfile) {
+  if (user && !myProfile) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100">
@@ -2068,6 +2343,7 @@ export default function App() {
            body * { visibility: hidden; } 
            .print-section, .print-section * { visibility: visible; } 
            .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; background: white; margin: 0;} 
+           .print-section img { max-width: 100% !important; }
            aside, header, .no-print { display: none !important; } 
            @page { margin: 0.5cm; }
         }
@@ -2176,15 +2452,17 @@ export default function App() {
           </div>
 
           <table className="w-full text-right border-collapse border border-gray-300">
-             <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
+             <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل والمستلم</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
              <tbody>
                 {printData.data?.map(o => {
-                   const profit = Number(o?.price || 0) - Number(o?.cogs || 0);
                    return (
                    <tr key={o?.id || Math.random()}>
                       <td className="p-3 border border-gray-300 font-mono text-xs">#{formatOrderNum(o)}</td>
                       <td className="p-3 border border-gray-300 text-xs">{formatDate(o?.completedAt)}</td>
-                      <td className="p-3 border border-gray-300 text-sm">{o?.customerName || 'غير محدد'}</td>
+                      <td className="p-3 border border-gray-300 text-sm">
+                         {o?.customerName || 'غير محدد'}
+                         {o?.receivedByName && <div className="text-[10px] text-gray-500 mt-1">بواسطة: {o.receivedByName}</div>}
+                      </td>
                       <td className="p-3 border border-gray-300 text-xs">{getOrderItems(o).map((i, idx) => <div key={idx}>{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</div>)}</td>
                       <td className="p-3 border border-gray-300 font-bold">{formatMoney(o?.price)}</td>
                    </tr>
@@ -2208,9 +2486,10 @@ export default function App() {
           </div>
           <div className="grid grid-cols-4 gap-4 mb-6">
              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">إجمالي الإيرادات</p><p className="font-bold text-lg text-blue-900">{formatMoney(printData.totals?.plIncome)} IQD</p></div>
-             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
              <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">المصروفات العامة</p><p className="font-bold text-lg text-red-900">{formatMoney(printData.totals?.filteredExpense)} IQD</p></div>
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.plNetProfit)} IQD</p><p className="text-[10px] text-green-700 mt-1">الهامش: {printData.totals?.plProfitMargin}%</p></div>
+             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-center"><p className="text-xs text-yellow-800">صافي الإيراد</p><p className="font-bold text-lg text-yellow-900">{formatMoney(printData.totals?.netRevenue)} IQD</p></div>
+             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center col-span-4"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-2xl text-green-900">{formatMoney(printData.totals?.finalNetProfit)} IQD</p></div>
           </div>
           <h4 className="font-bold text-gray-800 mb-2">تفاصيل الحركات المالية (ضمن الفترة)</h4>
           <table className="w-full text-right border-collapse border border-gray-300">
@@ -2281,8 +2560,8 @@ export default function App() {
                    <p className="font-medium text-sm md:text-lg">وضع الطباعة {isProductionPrint ? '(تذكرة معمل بدون سعر)' : isSalesReport || isFinanceReport ? '(تقرير شامل)' : '(فاتورة عميل)'} {!isSalesReport && !isFinanceReport && <span className="font-mono bg-blue-100 px-2 rounded ml-1">#{formatOrderNum(printData)}</span>}</p>
                  </div>
                  <div className="flex gap-2 w-full md:w-auto">
-                   <button onClick={() => window.print()} className="flex-1 md:flex-none bg-blue-600 text-white px-5 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"><Printer size={18} /> بدء الطباعة</button>
-                   <button onClick={() => setPrintData(null)} className="flex-1 md:flex-none bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg shadow hover:bg-gray-100 transition-colors text-center font-bold">إغلاق</button>
+                   <button onClick={handlePrintAction} disabled={isPrinting} className="flex-1 md:flex-none bg-blue-600 text-white px-5 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"><Printer size={18} /> {isPrinting ? 'جاري التجهيز...' : 'بدء الطباعة'}</button>
+                   <button onClick={() => setPrintData(null)} disabled={isPrinting} className="flex-1 md:flex-none bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg shadow hover:bg-gray-100 transition-colors text-center font-bold disabled:opacity-50">إغلاق</button>
                  </div>
                </div>
             )}
