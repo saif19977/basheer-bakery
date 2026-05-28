@@ -7,7 +7,7 @@ import {
   Store as StoreIcon, Truck, DollarSign, Users, 
   Plus, X, CheckCircle, TrendingUp, Package, Clock, AlertCircle,
   Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck,
-  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent
+  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent, Lock
 } from 'lucide-react';
 
 // --- صائد الأخطاء لمنع الشاشة البيضاء ---
@@ -55,16 +55,6 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'cakeshop-production';
 
-// --- القوائم المنسدلة ---
-const CAKE_CATEGORIES = {
-  'قالب كيك ايطالي': ['ايطالي ١٢ قطعة', 'ايطالي ٨ قطعة'],
-  'قالب كيك عالي': ['صغير عالي', 'وسط عالي', 'كبير عالي'],
-  'قالب كيك ارتفاع طبيعي': ['صغير', 'وسط', 'كبير'],
-  'علبة كوكيز': ['حجم قياسي'],
-  'فخارة كوكيز': ['حجم قياسي'],
-  'أخرى (إدخال يدوي)': []
-};
-
 // --- المكونات المشتركة ودوال المساعدة ---
 const formatMoney = (amount) => {
   return Math.round(Number(amount || 0)).toLocaleString('en-US');
@@ -111,7 +101,6 @@ const StatusBadge = ({ status }) => {
   return <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap ${styles[status] || 'bg-gray-100'}`}>{labels[status] || status}</span>;
 };
 
-// التواريخ محمية بالكامل لمنع الـ Crash
 const formatDate = (dateStr) => {
   if (!dateStr) return 'غير محدد';
   try {
@@ -276,6 +265,51 @@ export default function App() {
   }, [user]);
 
   const myProfile = profiles.find(p => p.uid === user?.uid);
+  const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
+
+  // بناء الفئات ديناميكياً من الخلطات
+  const dynamicCategories = React.useMemo(() => {
+    const cats = {
+      'قالب كيك ايطالي': ['ايطالي ١٢ قطعة', 'ايطالي ٨ قطعة'],
+      'قالب كيك عالي': ['صغير عالي', 'وسط عالي', 'كبير عالي'],
+      'قالب كيك ارتفاع طبيعي': ['صغير', 'وسط', 'كبير'],
+      'علبة كوكيز': ['حجم قياسي'],
+      'فخارة كوكيز': ['حجم قياسي'],
+      'أخرى (إدخال يدوي)': []
+    };
+    recipes.forEach(r => {
+       if (!cats[r.cakeCategory]) cats[r.cakeCategory] = [];
+       if (r.cakeSize && !cats[r.cakeCategory].includes(r.cakeSize)) {
+           cats[r.cakeCategory].push(r.cakeSize);
+       }
+    });
+    return cats;
+  }, [recipes]);
+
+  const defaultPermissions = {
+      admin: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery', 'Sales', 'Finance', 'Customers', 'Admin'],
+      manager: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery', 'Sales', 'Finance', 'Customers'],
+      operations: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery', 'Customers'],
+      sales: ['Orders', 'FinishedGoods', 'Sales', 'Customers'],
+      production: ['Production'],
+      store: ['FinishedGoods', 'Store'],
+      delivery: ['Delivery'],
+      finance: ['Finance', 'Sales'],
+      staff: []
+  };
+
+  const hasAccess = (tabId) => {
+    if (!myProfile) return false;
+    if (myProfile.role === 'admin') return true;
+    
+    // الصلاحيات المخصصة (أولوية)
+    if (myProfile.customPermissions && Array.isArray(myProfile.customPermissions)) {
+        return myProfile.customPermissions.includes(tabId);
+    }
+    
+    // الصلاحيات الافتراضية للرتبة
+    return defaultPermissions[myProfile.role]?.includes(tabId) || false;
+  };
 
   useEffect(() => {
     if (myProfile) {
@@ -309,24 +343,6 @@ export default function App() {
       uid: user.uid, name: joinName.trim(), username: username.trim().toLowerCase().replace(/\s+/g, ''),
       role: isFirst ? 'admin' : 'staff', createdAt: new Date().toISOString()
     });
-  };
-
-  const hasAccess = (tabId) => {
-    if (!myProfile) return false;
-    const role = myProfile?.role;
-    if (role === 'admin') return true;
-    
-    const permissions = {
-      manager: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery', 'Sales', 'Finance', 'Customers'],
-      operations: ['Dashboard', 'Orders', 'Production', 'FinishedGoods', 'Store', 'Delivery', 'Customers'],
-      sales: ['Orders', 'FinishedGoods', 'Sales', 'Customers'],
-      production: ['Production'],
-      store: ['FinishedGoods', 'Store'],
-      delivery: ['Delivery'],
-      finance: ['Finance', 'Sales'],
-      staff: []
-    };
-    return permissions[role]?.includes(tabId) || false;
   };
 
   const TABS = [
@@ -511,7 +527,8 @@ export default function App() {
       } else {
         const nextOrderNum = orders.length > 0 ? Math.max(...orders.map(o => Number(o.orderNumber) || 0)) + 1 : 1;
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
-          ...finalForm, status: initialStatus, cashStatus: orderCashStatus, createdAt: new Date().toISOString(), orderNumber: nextOrderNum
+          ...finalForm, status: initialStatus, cashStatus: orderCashStatus, createdAt: new Date().toISOString(), orderNumber: nextOrderNum,
+          createdByUid: user.uid, createdByName: myProfile?.name || 'غير معروف'
         });
         showNotification("تم حفظ الطلب بنجاح.");
       }
@@ -554,7 +571,8 @@ export default function App() {
               <td className="p-4 font-mono text-sm text-gray-500 font-bold">#{formatOrderNum(o)}</td>
               <td className="p-4">
                  <p className="font-medium text-gray-800">{o.customerName || 'غير محدد'}</p>
-                 <p className="text-xs text-gray-500 dir-ltr text-right font-mono">{o.phone || '-'}</p>
+                 {isManagerOrAdmin && o.createdByName && <span className="text-[9px] text-gray-500 bg-gray-100 px-1 rounded border">أُدخل بواسطة: {o.createdByName}</span>}
+                 <p className="text-xs text-gray-500 dir-ltr text-right font-mono mt-1">{o.phone || '-'}</p>
                  <div className="mt-1 flex gap-1">
                     <span className="text-[10px] bg-gray-100 px-1 rounded text-gray-600 border">{o.contactMethod || 'مباشر'}</span>
                     <span className={`text-[10px] px-1 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
@@ -654,14 +672,14 @@ export default function App() {
                                  <>
                                    <div>
                                      <label className="block text-xs font-bold text-gray-700 mb-1">النوع / الفئة</label>
-                                     <select value={item.cakeCategory} onChange={e => {handleItemChange(index, 'cakeCategory', e.target.value); handleItemChange(index, 'cakeSize', CAKE_CATEGORIES[e.target.value]?.[0]||'');}} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-amber-500 bg-white">
-                                       {Object.keys(CAKE_CATEGORIES).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                     <select value={item.cakeCategory} onChange={e => {handleItemChange(index, 'cakeCategory', e.target.value); handleItemChange(index, 'cakeSize', dynamicCategories[e.target.value]?.[0]||'');}} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-amber-500 bg-white">
+                                       {Object.keys(dynamicCategories).map(cat => <option key={cat} value={cat}>{cat}</option>)}
                                      </select>
                                    </div>
                                    {item.cakeCategory === 'أخرى (إدخال يدوي)' ? (
                                      <div><label className="block text-xs font-bold text-gray-700 mb-1">النوع يدوياً</label><input type="text" required value={item.customCakeType} onChange={e => handleItemChange(index, 'customCakeType', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
                                    ) : (
-                                     <div><label className="block text-xs font-bold text-gray-700 mb-1">الحجم</label><select value={item.cakeSize} onChange={e => handleItemChange(index, 'cakeSize', e.target.value)} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-amber-500 bg-white">{CAKE_CATEGORIES[item.cakeCategory]?.map(sz => <option key={sz} value={sz}>{sz}</option>)}</select></div>
+                                     <div><label className="block text-xs font-bold text-gray-700 mb-1">الحجم</label><select value={item.cakeSize} onChange={e => handleItemChange(index, 'cakeSize', e.target.value)} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-amber-500 bg-white">{dynamicCategories[item.cakeCategory]?.map(sz => <option key={sz} value={sz}>{sz}</option>)}</select></div>
                                    )}
                                  </>
                               )}
@@ -790,6 +808,9 @@ export default function App() {
               {type === 'delivery_complete' && (
                 <><button onClick={() => onPrimaryAction(order)} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2"><CheckCircle size={20} /> تأكيد التوصيل</button>
                 <button onClick={() => onSecondaryAction(order)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة فاتورة التوصيل للزبون"><Receipt size={20} /></button></>
+              )}
+              {type === 'delivery_view_only' && (
+                 <div className="w-full text-center p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg font-bold">هذا الطلب لا يزال في المعمل - يُستخدم هذا العرض للتنسيق مع الزبون فقط.</div>
               )}
            </div>
         </div>
@@ -1118,7 +1139,8 @@ export default function App() {
            quantity: sellQty, price: totalRevenue, orderSource: 'ready_made', selectedFG: selectedItem.id, itemImage: selectedItem.image || ''
         }],
         price: totalRevenue, createdAt: now, orderNumber: Date.now() % 10000,
-        images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, paymentType: sellForm.paymentType, cashStatus: orderCashStatus
+        images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, paymentType: sellForm.paymentType, cashStatus: orderCashStatus,
+        createdByUid: user.uid, createdByName: myProfile?.name || 'غير معروف'
       };
 
       if (sellForm.type === 'direct') {
@@ -1264,10 +1286,9 @@ export default function App() {
     const [viewMode, setViewMode] = useState('active');
     const [selectedOrder, setSelectedOrder] = useState(null);
 
-    const activeDeliveries = orders.filter(o => o && ['ready', 'out_for_delivery'].includes(o.status));
+    const activeDeliveries = orders.filter(o => o && ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status));
     const historyDeliveries = orders.filter(o => o?.status === 'completed');
 
-    // حماية بحث قسم التوصيل
     const displayedOrders = (viewMode === 'active' ? activeDeliveries : historyDeliveries).filter(o => {
       if (!o) return false;
       const sTerm = String(searchTerm || '').toLowerCase();
@@ -1312,40 +1333,60 @@ export default function App() {
         </div>
 
         {viewMode === 'active' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {displayedOrders.filter(o => o.status === 'ready').map(o => (
-                  <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
-                    <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
-                    <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
-                    <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
-                    <div className="mt-auto pt-2 flex justify-between items-center">
-                       <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
-                       <Countdown deliveryDate={o.deliveryDate} />
-                    </div>
-                  </div>
-                ))}
-                {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات.</p>}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-              <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
-                  <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
-                     <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
-                     <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
-                     <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
-                     <div className="mt-auto pt-2 flex justify-between items-center">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
-                        <Countdown deliveryDate={o.deliveryDate} />
+               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Clock size={18} className="text-yellow-500"/> قيد التحضير في المعمل (للتنسيق المسبق مع الزبون)</h3>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).map(o => (
+                     <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-yellow-200 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 transition-colors flex flex-col text-right">
+                        <span className="font-mono text-xs text-yellow-600 font-bold mb-1">#{formatOrderNum(o)}</span>
+                        <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                        <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                        <div className="mt-auto pt-2 flex justify-between items-center">
+                           <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                           <Countdown deliveryDate={o.deliveryDate} />
+                        </div>
                      </div>
-                  </div>
-                ))}
-                 {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
+                  ))}
+                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات في المعمل حالياً.</p>}
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {displayedOrders.filter(o => o.status === 'ready').map(o => (
+                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
+                      <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                      <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                      <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                      <div className="mt-auto pt-2 flex justify-between items-center">
+                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                         <Countdown deliveryDate={o.deliveryDate} />
+                      </div>
+                    </div>
+                  ))}
+                  {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات جاهزة للشحن.</p>}
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
+                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
+                       <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                       <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                       <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                       <div className="mt-auto pt-2 flex justify-between items-center">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                          <Countdown deliveryDate={o.deliveryDate} />
+                       </div>
+                    </div>
+                  ))}
+                   {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
+                </div>
               </div>
             </div>
           </div>
@@ -1364,7 +1405,14 @@ export default function App() {
           </Table>
         )}
 
-        <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : 'delivery_complete'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} />
+        <OrderDetailsModal 
+           isOpen={!!selectedOrder} 
+           onClose={() => setSelectedOrder(null)} 
+           order={selectedOrder} 
+           type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} 
+           onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} 
+           onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} 
+        />
       </div>
     );
   };
@@ -1374,7 +1422,6 @@ export default function App() {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
-    // حماية مشكلة الشاشة البيضاء في بحث سجل المبيعات
     const completed = orders.filter(o => {
       if (!o) return false;
       const searchNum = String(formatOrderNum(o)).toLowerCase();
@@ -1387,9 +1434,7 @@ export default function App() {
       try {
          if (startDate && new Date(o.completedAt || 0) < new Date(startDate)) return false;
          if (endDate && new Date(o.completedAt || 0) > new Date(endDate + 'T23:59:59')) return false;
-      } catch(e) {
-         // تجاهل الخطأ في التاريخ وإكمال الفلترة
-      }
+      } catch(e) {}
       return true;
     });
     
@@ -1474,17 +1519,14 @@ export default function App() {
     const [isModalOpen, setModalOpen] = useState(false);
     const [editingInvId, setEditingInvId] = useState(null);
     const [deleteInvModal, setDeleteInvModal] = useState(null);
-    const [logToFinance, setLogToFinance] = useState(true); // ربط المستودع بالمالية
+    const [logToFinance, setLogToFinance] = useState(true); 
     const [form, setForm] = useState({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
     
     const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
     const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
-    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] });
+    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] });
     const [selectedMat, setSelectedMat] = useState('');
     const [selectedMatQty, setSelectedMatQty] = useState('');
-
-    // تحديد صلاحيات التعديل والحذف للمدير ومدير المصنع فقط
-    const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
     const handleInventorySubmit = async (e) => {
       e.preventDefault();
@@ -1607,25 +1649,33 @@ export default function App() {
           return;
        }
 
+       const finalCat = recipeForm.cakeCategory === 'NEW_CATEGORY' ? recipeForm.customCategory : recipeForm.cakeCategory;
+       const finalSize = recipeForm.cakeSize === 'NEW_SIZE' ? recipeForm.customSize : recipeForm.cakeSize;
+
+       if (!finalCat || !finalSize) {
+          showNotification("❌ يرجى تحديد اسم الفئة والحجم بشكل صحيح.");
+          return;
+       }
+
        if (recipeForm.id) {
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recipes', recipeForm.id), { 
-              cakeCategory: recipeForm.cakeCategory,
-              cakeSize: recipeForm.cakeSize,
+              cakeCategory: finalCat,
+              cakeSize: finalSize,
               materials: finalMaterials 
           });
        } else {
-          const existingId = recipes.find(r => r.cakeCategory === recipeForm.cakeCategory && r.cakeSize === recipeForm.cakeSize)?.id;
+          const existingId = recipes.find(r => r.cakeCategory === finalCat && r.cakeSize === finalSize)?.id;
           if (existingId) {
              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recipes', existingId), { materials: finalMaterials });
           } else {
              await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'recipes'), {
-                cakeCategory: recipeForm.cakeCategory,
-                cakeSize: recipeForm.cakeSize,
+                cakeCategory: finalCat,
+                cakeSize: finalSize,
                 materials: finalMaterials
              });
           }
        }
-       showNotification("تم حفظ المعادلة بنجاح.");
+       showNotification("تم حفظ المعادلة بنجاح. سيظهر الصنف تلقائياً في قائمة البيع.");
        setRecipeModalOpen(false);
        setSelectedMat(''); setSelectedMatQty('');
     };
@@ -1642,7 +1692,9 @@ export default function App() {
        setRecipeForm({
           id: r.id,
           cakeCategory: r.cakeCategory,
+          customCategory: '',
           cakeSize: r.cakeSize,
+          customSize: '',
           materials: r.materials || []
        });
        setRecipeModalOpen(true);
@@ -1707,8 +1759,8 @@ export default function App() {
         {subTab === 'recipes' && (
            <>
              <div className="flex justify-between items-center mb-4">
-                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً من المستودع عند بدء الإنتاج وحساب التكلفة الفعلية.</p>
-                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
+                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً، وأي فئة تُضاف هنا ستظهر تلقائياً للبيع في شاشة إدارة الطلبات.</p>
+                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recipes.map(r => {
@@ -1790,8 +1842,24 @@ export default function App() {
         <Modal isOpen={isRecipeModalOpen} onClose={() => setRecipeModalOpen(false)} title={recipeForm.id ? "تعديل معادلة التصنيع" : "ضبط معادلة تصنيع جديدة"}>
           <form onSubmit={saveRecipe} className="space-y-4">
              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">فئة الكيك</label><select value={recipeForm.cakeCategory} onChange={e => setRecipeForm({...recipeForm, cakeCategory: e.target.value, cakeSize: CAKE_CATEGORIES[e.target.value]?.[0]||''})} className="w-full p-2.5 border rounded-lg outline-none bg-white">{Object.keys(CAKE_CATEGORIES).filter(c=>c!=='أخرى (إدخال يدوي)').map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">الحجم المستهدف</label><select value={recipeForm.cakeSize} onChange={e => setRecipeForm({...recipeForm, cakeSize: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none bg-white">{CAKE_CATEGORIES[recipeForm.cakeCategory]?.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 mb-1">فئة الكيك</label>
+                   <select required value={recipeForm.cakeCategory} onChange={e => setRecipeForm({...recipeForm, cakeCategory: e.target.value, cakeSize: dynamicCategories[e.target.value]?.[0]||''})} className="w-full p-2.5 border rounded-lg outline-none bg-white">
+                      <option value="">-- اختر الفئة --</option>
+                      <option value="NEW_CATEGORY" className="font-bold text-blue-600">➕ إضافة فئة كيك جديدة...</option>
+                      {Object.keys(dynamicCategories).filter(c=>c!=='أخرى (إدخال يدوي)').map(c => <option key={c} value={c}>{c}</option>)}
+                   </select>
+                   {recipeForm.cakeCategory === 'NEW_CATEGORY' && <input type="text" required placeholder="اكتب اسم الفئة الجديدة..." value={recipeForm.customCategory} onChange={e => setRecipeForm({...recipeForm, customCategory: e.target.value})} className="w-full mt-2 p-2 border border-blue-400 bg-blue-50 rounded-lg outline-none" />}
+                </div>
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 mb-1">الحجم المستهدف</label>
+                   <select required value={recipeForm.cakeSize} onChange={e => setRecipeForm({...recipeForm, cakeSize: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none bg-white">
+                      <option value="">-- اختر الحجم --</option>
+                      <option value="NEW_SIZE" className="font-bold text-blue-600">➕ إضافة حجم جديد...</option>
+                      {dynamicCategories[recipeForm.cakeCategory]?.map(s => <option key={s} value={s}>{s}</option>)}
+                   </select>
+                   {recipeForm.cakeSize === 'NEW_SIZE' && <input type="text" required placeholder="اكتب الحجم الجديد..." value={recipeForm.customSize} onChange={e => setRecipeForm({...recipeForm, customSize: e.target.value})} className="w-full mt-2 p-2 border border-blue-400 bg-blue-50 rounded-lg outline-none" />}
+                </div>
              </div>
 
              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
@@ -1864,7 +1932,6 @@ export default function App() {
     const filteredIncome = calcTotal(t => t.type === 'income');
     const filteredExpense = calcTotal(t => t.type === 'expense');
     
-    const plIncome = filteredIncome;
     const plOrders = orders.filter(o => {
        if (!o || o.status !== 'completed') return false;
        try {
@@ -1873,10 +1940,13 @@ export default function App() {
        } catch(e) {}
        return true;
     });
-    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0);
-    const plGrossProfit = plIncome - plCogs;
-    const plNetProfit = plGrossProfit - filteredExpense;
-    const plProfitMargin = plIncome > 0 ? ((plNetProfit / plIncome) * 100).toFixed(1) : 0;
+
+    // ترتيب المربعات المحدث: إجمالي الإيرادات -> مصروفات عامة -> صافي الإيراد -> تكلفة البضاعة -> صافي الربح النهائي
+    const plIncome = filteredIncome; // إجمالي الإيرادات
+    const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0); // تكلفة البضاعة المباعة
+    
+    const netRevenue = plIncome - filteredExpense; // صافي الإيراد
+    const finalNetProfit = netRevenue - plCogs; // صافي الربح النهائي
 
     const driverCashOrders = orders.filter(o => o?.status === 'completed' && o?.paymentType === 'نقد' && o?.cashStatus === 'with_driver');
     const creditOrders = orders.filter(o => o?.paymentType === 'آجل' && o?.cashStatus === 'credit_unpaid');
@@ -1927,33 +1997,33 @@ export default function App() {
                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
                  <span className="text-gray-400">-</span>
                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
-                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, plGrossProfit, filteredExpense, plNetProfit, plProfitMargin } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
+                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, filteredExpense, netRevenue, finalNetProfit } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-blue-500"></div>
                     <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الإيرادات</p>
                     <p className="text-xl font-bold text-blue-700">{formatMoney(plIncome)} IQD</p>
                  </div>
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-1 h-full bg-orange-500"></div>
-                    <p className="text-sm font-bold text-gray-500 mb-1">تكلفة البضاعة (COGS)</p>
-                    <p className="text-xl font-bold text-orange-700">{formatMoney(plCogs)} IQD</p>
+                    <div className="absolute top-0 right-0 w-1 h-full bg-red-500"></div>
+                    <p className="text-sm font-bold text-gray-500 mb-1">المصروفات العامة</p>
+                    <p className="text-xl font-bold text-red-700">{formatMoney(filteredExpense)} IQD</p>
                  </div>
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-yellow-500"></div>
-                    <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الربح (المجمل)</p>
-                    <p className="text-xl font-bold text-yellow-700">{formatMoney(plGrossProfit)} IQD</p>
+                    <p className="text-sm font-bold text-gray-500 mb-1">صافي الإيراد</p>
+                    <p className="text-xl font-bold text-yellow-700">{formatMoney(netRevenue)} IQD</p>
+                 </div>
+                 <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-1 h-full bg-orange-500"></div>
+                    <p className="text-sm font-bold text-gray-500 mb-1">تكلفة البضاعة المباعة</p>
+                    <p className="text-xl font-bold text-orange-700">{formatMoney(plCogs)} IQD</p>
                  </div>
                  <div className="bg-slate-800 p-5 rounded-xl shadow-md relative overflow-hidden">
                     <p className="text-sm font-bold text-slate-300 mb-1">صافي الربح النهائي</p>
-                    <p className={`text-xl font-bold ${plNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatMoney(plNetProfit)} IQD</p>
-                    <p className="text-xs text-slate-400 mt-2">المصروفات: {formatMoney(filteredExpense)} IQD</p>
-                 </div>
-                 <div className="bg-green-600 p-5 rounded-xl shadow-md flex flex-col justify-center items-center text-white">
-                    <p className="text-sm font-bold text-green-200 mb-1">نسبة هامش الربح</p>
-                    <p className="text-3xl font-bold flex items-center">{plProfitMargin} <Percent size={24}/></p>
+                    <p className={`text-xl font-bold ${finalNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatMoney(finalNetProfit)} IQD</p>
                  </div>
               </div>
            </div>
@@ -2047,10 +2117,25 @@ export default function App() {
 
   const AdminView = () => {
     const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+    const [permModal, setPermModal] = useState(null);
     const [newEmp, setNewEmp] = useState({ name: '', username: '', password: '', role: 'staff' });
 
     const handleRoleChange = async (profileId, newRole) => {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', profileId), { role: newRole });
+    };
+
+    const handleSavePermissions = async () => {
+       if(!permModal) return;
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { customPermissions: permModal.perms });
+       setPermModal(null);
+       showNotification("تم تحديث صلاحيات الموظف بنجاح.");
+    };
+
+    const togglePerm = (tabId) => {
+       setPermModal(prev => {
+          const newPerms = prev.perms.includes(tabId) ? prev.perms.filter(t => t !== tabId) : [...prev.perms, tabId];
+          return { ...prev, perms: newPerms };
+       });
     };
 
     const handleCreateEmployee = async (e) => {
@@ -2061,17 +2146,14 @@ export default function App() {
         const secondaryApp = getApps().find(app => app.name === appName) || initializeApp(firebaseConfig, appName);
         const secondaryAuth = getAuth(secondaryApp);
         
-        // منع تسجيل الدخول التلقائي لحساب الموظف الجديد في الجلسة الحالية
         await setPersistence(secondaryAuth, inMemoryPersistence);
-        
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, systemEmail, newEmp.password);
         const newUid = userCredential.user.uid;
-        
         await signOut(secondaryAuth);
         
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', newUid), {
           uid: newUid, name: newEmp.name, username: newEmp.username.trim().toLowerCase().replace(/\s+/g, ''),
-          role: newEmp.role, createdAt: new Date().toISOString()
+          role: newEmp.role, customPermissions: defaultPermissions[newEmp.role] || [], createdAt: new Date().toISOString()
         });
         
         setCreateModalOpen(false);
@@ -2088,25 +2170,43 @@ export default function App() {
     return (
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام</h2></div>
+          <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام والموظفين</h2></div>
           <button onClick={() => setCreateModalOpen(true)} className="bg-slate-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm w-full md:w-auto justify-center">
             <ShieldCheck size={20} /> إضافة موظف
           </button>
         </div>
-        <Table headers={['الاسم', 'اسم المستخدم', 'الصلاحية', 'تاريخ الانضمام']}>
+        <Table headers={['الاسم', 'اسم المستخدم', 'الرتبة', 'الصلاحيات', 'تاريخ الانضمام']}>
           {profiles.map(p => (
              <tr key={p.id} className="hover:bg-gray-50">
                <td className="p-4 font-semibold text-gray-800">{p.name} {p.uid === user.uid && <span className="text-xs bg-amber-100 text-amber-800 px-2 rounded ml-2">أنت</span>}</td>
                <td className="p-4 text-sm text-gray-600 font-mono bg-gray-100 rounded px-2">{p.username}</td>
                <td className="p-4">
                   <select value={p.role} onChange={(e) => handleRoleChange(p.id, e.target.value)} disabled={p.uid === user.uid} className="p-2 border rounded-lg text-sm bg-white">
-                    <option value="admin">المدير</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
+                    <option value="admin">المدير العام</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
                   </select>
+               </td>
+               <td className="p-4">
+                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.customPermissions || defaultPermissions[p.role] || [] })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> تعديل الوصول</button>
                </td>
                <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
              </tr>
           ))}
         </Table>
+
+        <Modal isOpen={!!permModal} onClose={() => setPermModal(null)} title={`تعديل صلاحيات الوصول: ${permModal?.name}`}>
+           <div className="space-y-4">
+              <p className="text-sm text-gray-600 mb-2">ضع علامة صح أمام الأقسام التي يُسمح لهذا الموظف برؤيتها والوصول إليها:</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
+                 {TABS.filter(t => t.id !== 'Admin').map(tab => (
+                    <label key={tab.id} className="flex items-center gap-3 p-2 bg-white rounded border cursor-pointer hover:bg-blue-50 transition-colors">
+                       <input type="checkbox" checked={permModal?.perms.includes(tab.id)} onChange={() => togglePerm(tab.id)} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer" />
+                       <span className="text-sm font-bold text-gray-800">{tab.label}</span>
+                    </label>
+                 ))}
+              </div>
+              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ الصلاحيات الجديدة</button>
+           </div>
+        </Modal>
 
         <Modal isOpen={isCreateModalOpen} onClose={() => setCreateModalOpen(false)} title="إنشاء حساب موظف">
           <form onSubmit={handleCreateEmployee} className="space-y-4">
@@ -2300,7 +2400,6 @@ export default function App() {
              <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
              <tbody>
                 {printData.data?.map(o => {
-                   const profit = Number(o?.price || 0) - Number(o?.cogs || 0);
                    return (
                    <tr key={o?.id || Math.random()}>
                       <td className="p-3 border border-gray-300 font-mono text-xs">#{formatOrderNum(o)}</td>
@@ -2331,7 +2430,7 @@ export default function App() {
              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">إجمالي الإيرادات</p><p className="font-bold text-lg text-blue-900">{formatMoney(printData.totals?.plIncome)} IQD</p></div>
              <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
              <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">المصروفات العامة</p><p className="font-bold text-lg text-red-900">{formatMoney(printData.totals?.filteredExpense)} IQD</p></div>
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.plNetProfit)} IQD</p><p className="text-[10px] text-green-700 mt-1">الهامش: {printData.totals?.plProfitMargin}%</p></div>
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.finalNetProfit)} IQD</p></div>
           </div>
           <h4 className="font-bold text-gray-800 mb-2">تفاصيل الحركات المالية (ضمن الفترة)</h4>
           <table className="w-full text-right border-collapse border border-gray-300">
