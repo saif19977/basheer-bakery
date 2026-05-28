@@ -56,8 +56,6 @@ const db = getFirestore(app);
 const appId = 'cakeshop-production';
 
 // --- دوال الحماية والمساعدة ---
-
-// دالة حماية النصوص لمنع الشاشة البيضاء عند البحث
 const safeStr = (val) => {
   if (val === null || val === undefined) return '';
   return String(val).toLowerCase().trim();
@@ -208,11 +206,11 @@ const Countdown = ({ deliveryDate }) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [profilesLoaded, setProfilesLoaded] = useState(false); // قفل التزامن للحماية
+  const [profilesLoaded, setProfilesLoaded] = useState(false); // قفل التزامن للحماية من الشاشة البيضاء
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [zoomedImage, setZoomedImage] = useState(null);
-  const [isPrinting, setIsPrinting] = useState(false); // حالة الطباعة لتسريع الاستجابة
+  const [isPrinting, setIsPrinting] = useState(false);
   
   const [profiles, setProfiles] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -239,11 +237,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => { 
-       setUser(u); 
-       setAuthLoading(false); 
-       if (!u) setProfilesLoaded(true); // لعدم تعليق الشاشة إذا لم يكن هناك مستخدم
-    });
+    const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setAuthLoading(false); });
     return () => unsubscribe();
   }, []);
 
@@ -256,7 +250,7 @@ export default function App() {
 
     const unsubProfiles = onSnapshot(dataPath('profiles'), (snap) => {
        setProfiles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-       setProfilesLoaded(true); // قفل التزامن يفتح هنا فقط
+       setProfilesLoaded(true);
     });
 
     const unsubOrders = onSnapshot(dataPath('orders'), (snap) => {
@@ -289,7 +283,7 @@ export default function App() {
   const myProfile = profiles.find(p => p.uid === user?.uid);
   const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
-  // بناء الفئات ديناميكياً من الخلطات - طلب المستخدم 
+  // بناء الفئات ديناميكياً من الخلطات
   const dynamicCategories = useMemo(() => {
     const cats = {
       'قالب كيك ايطالي': ['ايطالي ١٢ قطعة', 'ايطالي ٨ قطعة'],
@@ -357,27 +351,24 @@ export default function App() {
     e.preventDefault();
     if (!user || !joinName.trim()) return;
     
-    // حماية أمنية: إنشاء الملف مسموح فقط للمدير الأول عند التأسيس.
-    const isFirstSetup = profiles.length === 0;
-
-    if (!isFirstSetup) {
-       showNotification("❌ نظام محمي: لا يمكنك إنشاء حساب ذاتياً. يرجى مراجعة الإدارة.");
+    // إغلاق ثغرة إنشاء الحساب
+    if (profiles.length > 0) {
+       showNotification("❌ لا يمكنك إكمال التسجيل. النظام يمتلك مديراً بالفعل.");
        return;
     }
 
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', user.uid), {
       uid: user.uid, name: joinName.trim(), username: username.trim().toLowerCase().replace(/\s+/g, ''),
-      role: 'admin', createdAt: new Date().toISOString()
+      role: 'admin', customPermissions: defaultPermissions['admin'], createdAt: new Date().toISOString()
     });
   };
 
-  // دالة ذكية لتسريع الطباعة
   const handlePrintAction = () => {
      setIsPrinting(true);
      setTimeout(() => {
         window.print();
         setIsPrinting(false);
-     }, 500); // إعطاء نصف ثانية للمتصفح لتحميل الصور وترتيب الألوان قبل فتح نافذة الطباعة
+     }, 500); // إعطاء نصف ثانية لتحميل التنسيقات قبل الطباعة
   };
 
   const TABS = [
@@ -980,7 +971,7 @@ export default function App() {
        setSelectedOrder(null);
        
        if (missingRecipes.length > 0) {
-           showNotification(`⚠️ بدأ التحضير، لكن لم تخصم مواد لصنف (${missingRecipes.join('، ')}) لعدم وجود معادلة. الرجاء إضافتها من المستودع!`);
+           showNotification(`⚠️ بدأ التحضير، لكن لم تخصم مواد لصنف (${missingRecipes.join('، ')}) لعدم وجود معادلة.`);
        } else if (deductedItemsCount > 0) {
            showNotification("✅ تم البدء بالتحضير وخصم المواد من المستودع بنجاح!");
        } else {
@@ -1112,7 +1103,7 @@ export default function App() {
     const [addQty, setAddQty] = useState(1);
     const [sellForm, setSellForm] = useState({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
 
-    const filteredGoods = finishedGoods.filter(g => safeStr(g.name).includes(safeStr(searchTerm)) || safeStr(g.code).includes(safeStr(searchTerm)));
+    const filteredGoods = finishedGoods.filter(g => safeStr(g?.name).includes(safeStr(searchTerm)) || (g?.code && safeStr(g.code).includes(safeStr(searchTerm))));
 
     const handleUpload = async (e) => {
       const file = e.target.files[0];
@@ -1186,7 +1177,7 @@ export default function App() {
           ...baseOrderData, id: 'DIR-' + Date.now().toString().slice(-6),
           customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد', contactMethod: 'مباشر',
           status: 'completed', completedAt: now, printType: 'receipt', cashStatus: sellForm.paymentType === 'نقد' ? 'received_by_finance' : 'credit_unpaid',
-          receivedByUid: user.uid, receivedByName: myProfile?.name || 'غير معروف' // تسجيل المستلم
+          receivedByUid: user.uid, receivedByName: myProfile?.name || 'غير معروف'
         };
 
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
@@ -1327,11 +1318,9 @@ export default function App() {
     
     const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
     const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
-    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] });
+    const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] });
     const [selectedMat, setSelectedMat] = useState('');
     const [selectedMatQty, setSelectedMatQty] = useState('');
-
-    const isManagerOrAdmin = myProfile?.role === 'admin' || myProfile?.role === 'manager';
 
     const handleInventorySubmit = async (e) => {
       e.preventDefault();
@@ -1564,8 +1553,8 @@ export default function App() {
         {subTab === 'recipes' && (
            <>
              <div className="flex justify-between items-center mb-4">
-                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً من المستودع عند بدء الإنتاج وحساب التكلفة الفعلية.</p>
-                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
+                <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً، وأي فئة تُضاف هنا ستظهر تلقائياً للبيع في شاشة إدارة الطلبات.</p>
+                <button onClick={() => { setRecipeForm({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recipes.map(r => {
@@ -1695,6 +1684,16 @@ export default function App() {
           </form>
         </Modal>
 
+        <Modal isOpen={!!deleteRecipeModal} onClose={() => setDeleteRecipeModal(null)} title="تأكيد حذف المعادلة">
+          <div className="space-y-4">
+            <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذه المعادلة نهائياً؟ (لن يتم خصم مواد الكيك المرتبط بها مستقبلاً)</p>
+            <div className="flex gap-3">
+              <button onClick={confirmDeleteRecipe} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors">نعم، احذف المعادلة</button>
+              <button onClick={() => setDeleteRecipeModal(null)} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            </div>
+          </div>
+        </Modal>
+
       </div>
     );
   };
@@ -1740,7 +1739,6 @@ export default function App() {
     const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0); 
     const netRevenue = plIncome - filteredExpense; 
     const finalNetProfit = netRevenue - plCogs; 
-    const plProfitMargin = plIncome > 0 ? ((finalNetProfit / plIncome) * 100).toFixed(1) : 0;
 
     const driverCashOrders = orders.filter(o => o?.status === 'completed' && o?.paymentType === 'نقد' && o?.cashStatus === 'with_driver');
     const creditOrders = orders.filter(o => o?.paymentType === 'آجل' && o?.cashStatus === 'credit_unpaid');
@@ -1799,10 +1797,10 @@ export default function App() {
                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
                  <span className="text-gray-400">-</span>
                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-1.5 border rounded outline-none text-sm" />
-                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, filteredExpense, netRevenue, finalNetProfit, plProfitMargin } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
+                 <button onClick={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome, plCogs, filteredExpense, netRevenue, finalNetProfit } })} className="mr-auto bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><Printer size={14}/> طباعة التقرير</button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                  <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-1 h-full bg-blue-500"></div>
                     <p className="text-sm font-bold text-gray-500 mb-1">إجمالي الإيرادات</p>
@@ -2072,19 +2070,19 @@ export default function App() {
     );
   }
 
-  // المعالجة الأمنية النهائية لمنع أي موظف من إنشاء حساب لنفسه ما عدا الإعداد الأول للمدير
+  // الحماية القصوى لصفحة إكمال الملف الشخصي
   if (user && !myProfile) {
-    const isFirstSetup = profiles.length === 0;
-
-    if (isFirstSetup) {
+    const isFirstUser = profiles.length === 0;
+    
+    if (isFirstUser) {
       return (
         <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
           <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">إكمال الملف الشخصي للمدير</h1>
-            <p className="text-gray-500 mb-6 text-sm">هذه الخطوة تظهر مرة واحدة فقط. الرجاء إدخال اسم المدير الحقيقي.</p>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">إعداد النظام لأول مرة</h1>
+            <p className="text-gray-500 mb-6 text-sm">مرحباً بك في نظام مصنع بشير. الرجاء إدخال اسم المدير العام للبدء.</p>
             <form onSubmit={handleJoin} className="space-y-4 text-right">
-              <input type="text" required value={joinName} onChange={e => setJoinName(e.target.value)} placeholder="الاسم الكامل (مثال: علي محمد)" className="w-full p-3 border rounded-lg" />
-              <button type="submit" className="w-full bg-amber-600 text-white font-bold py-3 rounded-lg">إعداد النظام النهائي</button>
+              <input type="text" required value={joinName} onChange={e => setJoinName(e.target.value)} placeholder="اسم المدير (مثال: بشير الشكرچي)" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+              <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg shadow-md transition-all">تفعيل النظام</button>
             </form>
           </div>
         </div>
@@ -2092,10 +2090,13 @@ export default function App() {
     } else {
       return (
         <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
-          <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-red-600">
-            <h2 className="text-2xl font-bold text-red-600 mb-4">⚠️ حساب غير مصرح</h2>
-            <p className="text-gray-600 mb-6 font-medium leading-relaxed">هذا الحساب غير مسجل في قاعدة بيانات الموظفين. الرجاء مراجعة المدير العام لإنشاء ملف وظيفي لك بصلاحيات محددة.</p>
-            <button onClick={() => signOut(auth)} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow transition-colors">تسجيل الخروج</button>
+          <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-red-500">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+               <ShieldCheck size={32} className="text-red-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">وصول غير مصرح</h1>
+            <p className="text-gray-600 mb-6 text-sm leading-relaxed">هذا الحساب غير مسجل ضمن قائمة الموظفين المعتمدين. لا يمكنك الدخول للنظام إلا بعد أن يقوم المدير العام بإنشاء ملف لك.</p>
+            <button onClick={() => signOut(auth)} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow-md transition-all">تسجيل الخروج</button>
           </div>
         </div>
       );
@@ -2223,15 +2224,17 @@ export default function App() {
           </div>
 
           <table className="w-full text-right border-collapse border border-gray-300">
-             <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
+             <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل والمستلم</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
              <tbody>
                 {printData.data?.map(o => {
-                   const profit = Number(o?.price || 0) - Number(o?.cogs || 0);
                    return (
                    <tr key={o?.id || Math.random()}>
                       <td className="p-3 border border-gray-300 font-mono text-xs">#{formatOrderNum(o)}</td>
                       <td className="p-3 border border-gray-300 text-xs">{formatDate(o?.completedAt)}</td>
-                      <td className="p-3 border border-gray-300 text-sm">{o?.customerName || 'غير محدد'}</td>
+                      <td className="p-3 border border-gray-300 text-sm">
+                         {o?.customerName || 'غير محدد'}
+                         {o?.receivedByName && <div className="text-[10px] text-gray-500 mt-1">بواسطة: {o.receivedByName}</div>}
+                      </td>
                       <td className="p-3 border border-gray-300 text-xs">{getOrderItems(o).map((i, idx) => <div key={idx}>{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</div>)}</td>
                       <td className="p-3 border border-gray-300 font-bold">{formatMoney(o?.price)}</td>
                    </tr>
@@ -2255,9 +2258,10 @@ export default function App() {
           </div>
           <div className="grid grid-cols-4 gap-4 mb-6">
              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-center"><p className="text-xs text-blue-800">إجمالي الإيرادات</p><p className="font-bold text-lg text-blue-900">{formatMoney(printData.totals?.plIncome)} IQD</p></div>
-             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
              <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center"><p className="text-xs text-red-800">المصروفات العامة</p><p className="font-bold text-lg text-red-900">{formatMoney(printData.totals?.filteredExpense)} IQD</p></div>
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-lg text-green-900">{formatMoney(printData.totals?.finalNetProfit)} IQD</p><p className="text-[10px] text-green-700 mt-1">الهامش: {printData.totals?.plProfitMargin}%</p></div>
+             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-center"><p className="text-xs text-yellow-800">صافي الإيراد</p><p className="font-bold text-lg text-yellow-900">{formatMoney(printData.totals?.netRevenue)} IQD</p></div>
+             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200 text-center"><p className="text-xs text-orange-800">تكلفة البضاعة المباعة</p><p className="font-bold text-lg text-orange-900">{formatMoney(printData.totals?.plCogs)} IQD</p></div>
+             <div className="bg-green-50 p-4 rounded-lg border border-green-200 text-center col-span-4"><p className="text-xs text-green-800">صافي الربح النهائي</p><p className="font-bold text-2xl text-green-900">{formatMoney(printData.totals?.finalNetProfit)} IQD</p></div>
           </div>
           <h4 className="font-bold text-gray-800 mb-2">تفاصيل الحركات المالية (ضمن الفترة)</h4>
           <table className="w-full text-right border-collapse border border-gray-300">
