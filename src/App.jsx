@@ -300,14 +300,14 @@ export default function App() {
 
   const hasAccess = (tabId) => {
     if (!myProfile) return false;
-    if (myProfile.role === 'admin') return true;
+    if (myProfile.role === 'admin') return true; // المدير دائماً يرى كل شيء
     
-    // الصلاحيات المخصصة (أولوية)
-    if (myProfile.customPermissions && Array.isArray(myProfile.customPermissions)) {
+    // الصلاحيات المخصصة والدائمة (لن تتغير تلقائياً أبداً)
+    if (myProfile.hasCustomPerms && Array.isArray(myProfile.customPermissions)) {
         return myProfile.customPermissions.includes(tabId);
     }
     
-    // الصلاحيات الافتراضية للرتبة
+    // الصلاحيات الافتراضية للرتبة إذا لم يحدد المدير صلاحيات مخصصة
     return defaultPermissions[myProfile.role]?.includes(tabId) || false;
   };
 
@@ -1281,239 +1281,6 @@ export default function App() {
     );
   };
 
-  const DeliveryView = () => {
-    const [searchTerm, setSearchTerm] = useState('');
-    const [viewMode, setViewMode] = useState('active');
-    const [selectedOrder, setSelectedOrder] = useState(null);
-
-    const activeDeliveries = orders.filter(o => o && ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status));
-    const historyDeliveries = orders.filter(o => o?.status === 'completed');
-
-    const displayedOrders = (viewMode === 'active' ? activeDeliveries : historyDeliveries).filter(o => {
-      if (!o) return false;
-      const sTerm = String(searchTerm || '').toLowerCase();
-      const orderSearchNum = String(formatOrderNum(o)).toLowerCase();
-      const nameStr = String(o.customerName || '').toLowerCase();
-      const phoneStr = String(o.phone || '').toLowerCase();
-      const addressStr = String(o.address || '').toLowerCase();
-      return nameStr.includes(sTerm) || phoneStr.includes(sTerm) || addressStr.includes(sTerm) || orderSearchNum.includes(sTerm);
-    });
-
-    const handleDispatch = async (order) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
-      setSelectedOrder(null);
-    };
-
-    const handleDelivered = async (order) => {
-      const now = new Date().toISOString();
-      const updateData = { status: 'completed', completedAt: now };
-      
-      if (order.paymentType === 'نقد' || !order.paymentType) {
-         updateData.cashStatus = 'with_driver'; 
-         showNotification("تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.");
-      } else {
-         updateData.cashStatus = 'credit_unpaid';
-         showNotification("تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.");
-      }
-
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
-      setSelectedOrder(null);
-    };
-
-    return (
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <h2 className="text-2xl font-bold text-gray-800">التوصيل والشحن</h2>
-          <div className="relative w-full md:w-64"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم، الهاتف، الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <button onClick={() => setViewMode('active')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'active' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الطلبات الحالية</button>
-          <button onClick={() => setViewMode('history')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'history' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>السجل العام</button>
-        </div>
-
-        {viewMode === 'active' ? (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Clock size={18} className="text-yellow-500"/> قيد التحضير في المعمل (للتنسيق المسبق مع الزبون)</h3>
-               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).map(o => (
-                     <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-yellow-200 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 transition-colors flex flex-col text-right">
-                        <span className="font-mono text-xs text-yellow-600 font-bold mb-1">#{formatOrderNum(o)}</span>
-                        <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
-                        <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
-                        <div className="mt-auto pt-2 flex justify-between items-center">
-                           <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
-                           <Countdown deliveryDate={o.deliveryDate} />
-                        </div>
-                     </div>
-                  ))}
-                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات في المعمل حالياً.</p>}
-               </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
-                <div className="grid grid-cols-1 gap-3">
-                  {displayedOrders.filter(o => o.status === 'ready').map(o => (
-                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
-                      <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
-                      <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
-                      <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
-                      <div className="mt-auto pt-2 flex justify-between items-center">
-                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
-                         <Countdown deliveryDate={o.deliveryDate} />
-                      </div>
-                    </div>
-                  ))}
-                  {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات جاهزة للشحن.</p>}
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
-                <div className="grid grid-cols-1 gap-3">
-                  {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
-                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
-                       <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
-                       <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
-                       <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
-                       <div className="mt-auto pt-2 flex justify-between items-center">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
-                          <Countdown deliveryDate={o.deliveryDate} />
-                       </div>
-                    </div>
-                  ))}
-                   {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <Table headers={['رقم الطلب', 'العميل', 'الهاتف', 'الدفع', 'تاريخ التسليم', 'الفاتورة']}>
-            {displayedOrders.map(o => (
-              <tr key={o.id} className="hover:bg-gray-50">
-                <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
-                <td className="p-4 font-medium">{o.customerName || 'غير محدد'}</td>
-                <td className="p-4 dir-ltr text-right text-sm font-mono">{o.phone || '-'}</td>
-                <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
-                <td className="p-4 text-sm text-gray-500">{formatDate(o.completedAt)}</td>
-                <td className="p-4"><button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors"><Printer size={16} /></button></td>
-              </tr>
-            ))}
-          </Table>
-        )}
-
-        <OrderDetailsModal 
-           isOpen={!!selectedOrder} 
-           onClose={() => setSelectedOrder(null)} 
-           order={selectedOrder} 
-           type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} 
-           onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} 
-           onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} 
-        />
-      </div>
-    );
-  };
-
-  const SalesView = () => {
-    const [searchTerm, setSearchTerm] = useState('');
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
-
-    const completed = orders.filter(o => {
-      if (!o) return false;
-      const searchNum = String(formatOrderNum(o)).toLowerCase();
-      const nameStr = String(o.customerName || '').toLowerCase();
-      const sTerm = String(searchTerm || '').toLowerCase();
-      const matchSearch = (nameStr.includes(sTerm) || searchNum.includes(sTerm));
-      
-      if (o.status !== 'completed' || !matchSearch) return false;
-      
-      try {
-         if (startDate && new Date(o.completedAt || 0) < new Date(startDate)) return false;
-         if (endDate && new Date(o.completedAt || 0) > new Date(endDate + 'T23:59:59')) return false;
-      } catch(e) {}
-      return true;
-    });
-    
-    const monthlyData = {};
-    completed.forEach(o => {
-      let monthYear = 'غير محدد';
-      try {
-         if (o.completedAt) {
-            const d = new Date(o.completedAt);
-            if (!isNaN(d.getTime())) {
-               const y = d.getFullYear();
-               const m = String(d.getMonth() + 1).padStart(2, '0');
-               monthYear = `${y}-${m}`;
-            }
-         }
-      } catch(e) {}
-
-      if (!monthlyData[monthYear]) monthlyData[monthYear] = { count: 0, revenue: 0 };
-      monthlyData[monthYear].count += 1;
-      monthlyData[monthYear].revenue += Number(o.price || 0);
-    });
-
-    const totalSales = completed.reduce((sum, o) => sum + Number(o.price || 0), 0);
-
-    return (
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <h2 className="text-2xl font-bold text-gray-800">سجل المبيعات</h2>
-          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-            <div className="relative flex-1 md:w-48"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم أو الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm" /></div>
-            <div className="flex items-center gap-2">
-               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="من تاريخ" />
-               <span className="text-gray-400">-</span>
-               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="إلى تاريخ" />
-            </div>
-            <button onClick={() => setPrintData({ printType: 'sales_report', data: completed, startDate, endDate, totalSales })} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors whitespace-nowrap"><Printer size={18} /> طباعة التقرير</button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <StatCard title="الطلبات المكتملة ضمن البحث" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
-          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${formatMoney(totalSales)} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
-        </div>
-        
-        <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية ضمن البحث</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
-          {Object.entries(monthlyData).sort().reverse().map(([month, data]) => (
-            <div key={month} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-1 h-full bg-amber-500"></div>
-              <h4 className="font-bold text-gray-700 mb-2 dir-ltr text-right">{month}</h4>
-              <p className="text-sm text-gray-500 mb-1">الطلبات: <span className="font-bold text-gray-700">{data.count}</span></p>
-              <p className="text-xl font-bold text-green-600 mt-2">{formatMoney(data.revenue)} IQD</p>
-            </div>
-          ))}
-        </div>
-
-        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">التفاصيل والأرباح لكل طلب</h3>
-        <Table headers={['رقم الطلب', 'تاريخ الاكتمال', 'العميل', 'المبلغ المستلم', 'التكلفة (COGS)', 'صافي ربح الطلب']}>
-          {completed.map(o => {
-            const price = Number(o?.price || 0);
-            const cogs = Number(o?.cogs || 0);
-            const profit = price - cogs;
-            const margin = price > 0 ? ((profit / price) * 100).toFixed(1) : 0;
-            return (
-             <tr key={o.id} className="hover:bg-gray-50">
-               <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
-               <td className="p-4 text-xs text-gray-500">{formatDate(o.completedAt)}</td>
-               <td className="p-4 font-medium text-sm">{o.customerName || 'غير محدد'}</td>
-               <td className="p-4 font-semibold text-green-700">{formatMoney(price)} IQD</td>
-               <td className="p-4 font-semibold text-orange-700">{formatMoney(cogs)} IQD</td>
-               <td className="p-4 font-bold text-blue-700">{formatMoney(profit)} IQD <span className="text-xs text-gray-500 font-normal">({margin}%)</span></td>
-             </tr>
-          )})}
-          {completed.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبيعات مطابقة لبحثك.</td></tr>}
-        </Table>
-      </div>
-    );
-  };
-
   const StoreView = () => {
     const [subTab, setSubTab] = useState('inventory'); // inventory, logs, recipes
     const [isModalOpen, setModalOpen] = useState(false);
@@ -1878,7 +1645,7 @@ export default function App() {
                       <div key={idx} className="flex justify-between bg-white p-2 rounded border text-sm items-center">
                          <span className="font-medium text-gray-800">{m.itemName}</span>
                          <div className="flex items-center gap-3">
-                            <span className="font-bold text-blue-700">{m.qty} {m.unit}</span>
+                            <span className="font-bold text-gray-700">{m.qty} {m.unit}</span>
                             <button type="button" onClick={() => setRecipeForm({...recipeForm, materials: recipeForm.materials.filter((_, i) => i !== idx)})} className="text-red-500 hover:bg-red-50 p-1 rounded"><X size={16}/></button>
                          </div>
                       </div>
@@ -2118,6 +1885,7 @@ export default function App() {
   const AdminView = () => {
     const [isCreateModalOpen, setCreateModalOpen] = useState(false);
     const [permModal, setPermModal] = useState(null);
+    const [deleteUserModal, setDeleteUserModal] = useState(null);
     const [newEmp, setNewEmp] = useState({ name: '', username: '', password: '', role: 'staff' });
 
     const handleRoleChange = async (profileId, newRole) => {
@@ -2126,9 +1894,12 @@ export default function App() {
 
     const handleSavePermissions = async () => {
        if(!permModal) return;
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { customPermissions: permModal.perms });
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { 
+          customPermissions: permModal.perms,
+          hasCustomPerms: true 
+       });
        setPermModal(null);
-       showNotification("تم تحديث صلاحيات الموظف بنجاح.");
+       showNotification("تم تحديث وتثبيت صلاحيات الموظف بنجاح.");
     };
 
     const togglePerm = (tabId) => {
@@ -2136,6 +1907,13 @@ export default function App() {
           const newPerms = prev.perms.includes(tabId) ? prev.perms.filter(t => t !== tabId) : [...prev.perms, tabId];
           return { ...prev, perms: newPerms };
        });
+    };
+
+    const confirmDeleteUser = async () => {
+        if(!deleteUserModal) return;
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', deleteUserModal.id));
+        showNotification("تم حذف الموظف وإيقاف وصوله للنظام نهائياً.");
+        setDeleteUserModal(null);
     };
 
     const handleCreateEmployee = async (e) => {
@@ -2153,7 +1931,7 @@ export default function App() {
         
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', newUid), {
           uid: newUid, name: newEmp.name, username: newEmp.username.trim().toLowerCase().replace(/\s+/g, ''),
-          role: newEmp.role, customPermissions: defaultPermissions[newEmp.role] || [], createdAt: new Date().toISOString()
+          role: newEmp.role, customPermissions: defaultPermissions[newEmp.role] || [], hasCustomPerms: false, createdAt: new Date().toISOString()
         });
         
         setCreateModalOpen(false);
@@ -2175,7 +1953,7 @@ export default function App() {
             <ShieldCheck size={20} /> إضافة موظف
           </button>
         </div>
-        <Table headers={['الاسم', 'اسم المستخدم', 'الرتبة', 'الصلاحيات', 'تاريخ الانضمام']}>
+        <Table headers={['الاسم', 'اسم المستخدم', 'الرتبة', 'تخصيص الصلاحيات', 'حذف']}>
           {profiles.map(p => (
              <tr key={p.id} className="hover:bg-gray-50">
                <td className="p-4 font-semibold text-gray-800">{p.name} {p.uid === user.uid && <span className="text-xs bg-amber-100 text-amber-800 px-2 rounded ml-2">أنت</span>}</td>
@@ -2186,14 +1964,27 @@ export default function App() {
                   </select>
                </td>
                <td className="p-4">
-                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.customPermissions || defaultPermissions[p.role] || [] })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> تعديل الوصول</button>
+                  <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.hasCustomPerms ? p.customPermissions : (defaultPermissions[p.role] || []) })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> تعديل الوصول {p.hasCustomPerms && '🔒'}</button>
                </td>
-               <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
+               <td className="p-4">
+                  <button onClick={() => setDeleteUserModal(p)} disabled={p.uid === user.uid} className="text-red-600 hover:text-red-800 p-2 bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={16}/></button>
+               </td>
              </tr>
           ))}
         </Table>
 
-        <Modal isOpen={!!permModal} onClose={() => setPermModal(null)} title={`تعديل صلاحيات الوصول: ${permModal?.name}`}>
+        <Modal isOpen={!!deleteUserModal} onClose={() => setDeleteUserModal(null)} title="تأكيد طرد الموظف">
+          <div className="space-y-4">
+            <p className="text-gray-700 font-medium">هل أنت متأكد من رغبتك في حذف الموظف <span className="font-bold">({deleteUserModal?.name})</span> ومنعه من الدخول للنظام نهائياً؟</p>
+            <div className="bg-red-50 p-3 rounded text-sm text-red-800 border border-red-200 font-bold">ملاحظة لتغيير الباسورد: إذا نسي الموظف كلمة مروره، احذف حسابه من هنا، ثم قم بإنشاء حساب جديد له بنفس الاسم مع الباسورد الجديد.</div>
+            <div className="flex gap-3">
+              <button onClick={confirmDeleteUser} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors">نعم، احذف الموظف</button>
+              <button onClick={() => setDeleteUserModal(null)} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal isOpen={!!permModal} onClose={() => setPermModal(null)} title={`صلاحيات الوصول: ${permModal?.name}`}>
            <div className="space-y-4">
               <p className="text-sm text-gray-600 mb-2">ضع علامة صح أمام الأقسام التي يُسمح لهذا الموظف برؤيتها والوصول إليها:</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
@@ -2204,7 +1995,7 @@ export default function App() {
                     </label>
                  ))}
               </div>
-              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ الصلاحيات الجديدة</button>
+              <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ وتثبيت الصلاحيات</button>
            </div>
         </Modal>
 
@@ -2400,6 +2191,7 @@ export default function App() {
              <thead><tr className="bg-gray-100"><th className="p-3 border border-gray-300 text-sm">رقم الطلب</th><th className="p-3 border border-gray-300 text-sm">التاريخ</th><th className="p-3 border border-gray-300 text-sm">العميل</th><th className="p-3 border border-gray-300 text-sm">الأصناف</th><th className="p-3 border border-gray-300 text-sm">المبلغ (IQD)</th></tr></thead>
              <tbody>
                 {printData.data?.map(o => {
+                   const profit = Number(o?.price || 0) - Number(o?.cogs || 0);
                    return (
                    <tr key={o?.id || Math.random()}>
                       <td className="p-3 border border-gray-300 font-mono text-xs">#{formatOrderNum(o)}</td>
