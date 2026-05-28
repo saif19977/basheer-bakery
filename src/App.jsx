@@ -222,12 +222,10 @@ export default function App() {
   const prevOrderCount = useRef(0);
   
   const [activeTab, setActiveTab] = useState('Orders');
-  const [joinName, setJoinName] = useState('');
   const [printData, setPrintData] = useState(null);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isSetupMode, setIsSetupMode] = useState(false);
   const [authError, setAuthError] = useState('');
 
   const showNotification = (message) => {
@@ -243,7 +241,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user) {
-       setProfilesLoaded(true);
+       setProfilesLoaded(false);
        return;
     }
     const dataPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
@@ -338,37 +336,21 @@ export default function App() {
     setAuthError('');
     const systemEmail = getSystemEmail(username);
     try {
-      if (isSetupMode) await createUserWithEmailAndPassword(auth, systemEmail, password);
-      else await signInWithEmailAndPassword(auth, systemEmail, password);
+      await signInWithEmailAndPassword(auth, systemEmail, password);
     } catch (err) {
       if (err.code === 'auth/invalid-credential') setAuthError('اسم المستخدم أو كلمة المرور غير صحيحة.');
-      else if (err.code === 'auth/email-already-in-use') setAuthError('اسم المستخدم هذا مستخدم مسبقاً.');
+      else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') setAuthError('بيانات الدخول خاطئة، تأكد من الإدارة.');
       else setAuthError(err.message);
     }
   };
 
-  const handleJoin = async (e) => {
-    e.preventDefault();
-    if (!user || !joinName.trim()) return;
-    
-    // إغلاق ثغرة إنشاء الحساب
-    if (profiles.length > 0) {
-       showNotification("❌ لا يمكنك إكمال التسجيل. النظام يمتلك مديراً بالفعل.");
-       return;
-    }
-
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', user.uid), {
-      uid: user.uid, name: joinName.trim(), username: username.trim().toLowerCase().replace(/\s+/g, ''),
-      role: 'admin', customPermissions: defaultPermissions['admin'], createdAt: new Date().toISOString()
-    });
-  };
-
+  // دالة ذكية لتسريع الطباعة
   const handlePrintAction = () => {
      setIsPrinting(true);
      setTimeout(() => {
         window.print();
         setIsPrinting(false);
-     }, 500); // إعطاء نصف ثانية لتحميل التنسيقات قبل الطباعة
+     }, 500); 
   };
 
   const TABS = [
@@ -1308,6 +1290,246 @@ export default function App() {
     );
   };
 
+  const DeliveryView = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [viewMode, setViewMode] = useState('active');
+    const [selectedOrder, setSelectedOrder] = useState(null);
+
+    const activeDeliveries = orders.filter(o => o && ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status));
+    const historyDeliveries = orders.filter(o => o?.status === 'completed');
+
+    const displayedOrders = (viewMode === 'active' ? activeDeliveries : historyDeliveries).filter(o => {
+      if (!o) return false;
+      const sTerm = safeStr(searchTerm);
+      const orderSearchNum = safeStr(formatOrderNum(o));
+      const nameStr = safeStr(o.customerName);
+      const phoneStr = safeStr(o.phone);
+      const addressStr = safeStr(o.address);
+      return nameStr.includes(sTerm) || phoneStr.includes(sTerm) || addressStr.includes(sTerm) || orderSearchNum.includes(sTerm);
+    });
+
+    const handleDispatch = async (order) => {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
+      setSelectedOrder(null);
+    };
+
+    const handleDelivered = async (order) => {
+      const now = new Date().toISOString();
+      const updateData = { 
+         status: 'completed', 
+         completedAt: now,
+         receivedByUid: user.uid,
+         receivedByName: myProfile?.name || 'غير معروف' 
+      };
+      
+      if (order.paymentType === 'نقد' || !order.paymentType) {
+         updateData.cashStatus = 'with_driver'; 
+         showNotification("تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.");
+      } else {
+         updateData.cashStatus = 'credit_unpaid';
+         showNotification("تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.");
+      }
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
+      setSelectedOrder(null);
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-gray-800">التوصيل والشحن</h2>
+          <div className="relative w-full md:w-64"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم، الهاتف، الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setViewMode('active')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'active' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>الطلبات الحالية</button>
+          <button onClick={() => setViewMode('history')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'history' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-white text-gray-600 border'}`}>السجل العام</button>
+        </div>
+
+        {viewMode === 'active' ? (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+               <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Clock size={18} className="text-yellow-500"/> قيد التحضير في المعمل (للتنسيق المسبق مع الزبون)</h3>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).map(o => (
+                     <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-yellow-200 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 transition-colors flex flex-col text-right">
+                        <span className="font-mono text-xs text-yellow-600 font-bold mb-1">#{formatOrderNum(o)}</span>
+                        <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                        <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                        <div className="mt-auto pt-2 flex justify-between items-center">
+                           <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                           <Countdown deliveryDate={o.deliveryDate} />
+                        </div>
+                     </div>
+                  ))}
+                  {displayedOrders.filter(o => ['pending', 'baking'].includes(o.status)).length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات في المعمل حالياً.</p>}
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Package size={18} className="text-blue-500"/> جاهز للشحن</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {displayedOrders.filter(o => o.status === 'ready').map(o => (
+                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-blue-200 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors flex flex-col text-right">
+                      <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                      <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                      <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                      <div className="mt-auto pt-2 flex justify-between items-center">
+                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                         <Countdown deliveryDate={o.deliveryDate} />
+                      </div>
+                    </div>
+                  ))}
+                  {displayedOrders.filter(o => o.status === 'ready').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا توجد طلبات جاهزة للشحن.</p>}
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Truck size={18} className="text-purple-500"/> في الطريق للعميل</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {displayedOrders.filter(o => o.status === 'out_for_delivery').map(o => (
+                    <div key={o.id} onClick={() => setSelectedOrder(o)} className="p-3 border border-purple-200 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors flex flex-col text-right">
+                       <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
+                       <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
+                       <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                       <div className="mt-auto pt-2 flex justify-between items-center">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
+                          <Countdown deliveryDate={o.deliveryDate} />
+                       </div>
+                    </div>
+                  ))}
+                   {displayedOrders.filter(o => o.status === 'out_for_delivery').length === 0 && <p className="text-sm text-gray-400 py-2 col-span-full text-center">لا يوجد سائقون في الخارج.</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Table headers={['رقم الطلب', 'العميل', 'الهاتف', 'الدفع', 'تاريخ التسليم', 'الفاتورة']}>
+            {displayedOrders.map(o => (
+              <tr key={o.id} className="hover:bg-gray-50">
+                <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+                <td className="p-4 font-medium">
+                   {o.customerName || 'غير محدد'}
+                   {o.receivedByName && <div className="text-[10px] text-gray-500 mt-1">المستلم: {o.receivedByName}</div>}
+                </td>
+                <td className="p-4 dir-ltr text-right text-sm font-mono">{o.phone || '-'}</td>
+                <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
+                <td className="p-4 text-sm text-gray-500">{formatDate(o.completedAt)}</td>
+                <td className="p-4"><button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors"><Printer size={16} /></button></td>
+              </tr>
+            ))}
+          </Table>
+        )}
+
+        <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} />
+      </div>
+    );
+  };
+
+  const SalesView = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
+    const completed = orders.filter(o => {
+      if (!o || o.status !== 'completed') return false;
+      const s = safeStr(searchTerm);
+      const searchNum = safeStr(formatOrderNum(o));
+      const nameStr = safeStr(o.customerName);
+      
+      if (s && !nameStr.includes(s) && !searchNum.includes(s)) return false;
+      
+      if (startDate || endDate) {
+        try {
+           const dTime = new Date(o.completedAt || o.createdAt).getTime();
+           if (startDate && dTime < new Date(startDate).getTime()) return false;
+           if (endDate && dTime > new Date(endDate + 'T23:59:59').getTime()) return false;
+        } catch(e) {}
+      }
+      return true;
+    });
+    
+    const monthlyData = {};
+    completed.forEach(o => {
+      let monthYear = 'غير محدد';
+      try {
+         const dateToUse = o.completedAt || o.createdAt;
+         if (dateToUse) {
+            const d = new Date(dateToUse);
+            if (!isNaN(d.getTime())) {
+               const y = d.getFullYear();
+               const m = String(d.getMonth() + 1).padStart(2, '0');
+               monthYear = `${y}-${m}`;
+            }
+         }
+      } catch(e) {}
+
+      if (!monthlyData[monthYear]) monthlyData[monthYear] = { count: 0, revenue: 0 };
+      monthlyData[monthYear].count += 1;
+      monthlyData[monthYear].revenue += Number(o.price || 0);
+    });
+
+    const totalSales = completed.reduce((sum, o) => sum + Number(o.price || 0), 0);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-gray-800">سجل المبيعات</h2>
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-48"><Search className="absolute right-3 top-2.5 text-gray-400" size={20} /><input type="text" placeholder="بحث بالاسم أو الرقم..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-3 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-sm" /></div>
+            <div className="flex items-center gap-2">
+               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="من تاريخ" />
+               <span className="text-gray-400">-</span>
+               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm focus:ring-2 focus:ring-amber-500" title="إلى تاريخ" />
+            </div>
+            <button onClick={() => setPrintData({ printType: 'sales_report', data: completed, startDate, endDate, totalSales })} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors whitespace-nowrap"><Printer size={18} /> طباعة التقرير</button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <StatCard title="الطلبات المكتملة ضمن البحث" value={completed.length} icon={CheckCircle} colorClass="bg-green-100 text-green-600" />
+          <StatCard title="إجمالي الإيرادات ضمن البحث" value={`${formatMoney(totalSales)} IQD`} icon={TrendingUp} colorClass="bg-blue-100 text-blue-600" />
+        </div>
+        
+        <h3 className="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">التقارير الشهرية ضمن البحث</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+          {Object.entries(monthlyData).sort().reverse().map(([month, data]) => (
+            <div key={month} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-1 h-full bg-amber-500"></div>
+              <h4 className="font-bold text-gray-700 mb-2 dir-ltr text-right">{month}</h4>
+              <p className="text-sm text-gray-500 mb-1">الطلبات: <span className="font-bold text-gray-700">{data.count}</span></p>
+              <p className="text-xl font-bold text-green-600 mt-2">{formatMoney(data.revenue)} IQD</p>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">التفاصيل والأرباح لكل طلب</h3>
+        <Table headers={['رقم الطلب', 'تاريخ الاكتمال', 'العميل والمستلم', 'المبلغ المستلم', 'التكلفة (COGS)', 'صافي ربح الطلب']}>
+          {completed.map(o => {
+            const price = Number(o?.price || 0);
+            const cogs = Number(o?.cogs || 0);
+            const profit = price - cogs;
+            const margin = price > 0 ? ((profit / price) * 100).toFixed(1) : 0;
+            return (
+             <tr key={o.id} className="hover:bg-gray-50">
+               <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
+               <td className="p-4 text-xs text-gray-500">{formatDate(o.completedAt || o.createdAt)}</td>
+               <td className="p-4">
+                  <p className="font-medium text-sm">{o.customerName || 'غير محدد'}</p>
+                  {o.receivedByName && <span className="text-[10px] text-gray-500 bg-gray-100 px-1 rounded border">المستلم: {o.receivedByName}</span>}
+               </td>
+               <td className="p-4 font-semibold text-green-700">{formatMoney(price)} IQD</td>
+               <td className="p-4 font-semibold text-orange-700">{formatMoney(cogs)} IQD</td>
+               <td className="p-4 font-bold text-blue-700">{formatMoney(profit)} IQD <span className="text-xs text-gray-500 font-normal">({margin}%)</span></td>
+             </tr>
+          )})}
+          {completed.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبيعات مطابقة لبحثك.</td></tr>}
+        </Table>
+      </div>
+    );
+  };
+
   const StoreView = () => {
     const [subTab, setSubTab] = useState('inventory'); // inventory, logs, recipes
     const [isModalOpen, setModalOpen] = useState(false);
@@ -2033,74 +2255,50 @@ export default function App() {
 
   // --- واجهات التحميل والدخول ---
 
-  if (authLoading || !profilesLoaded) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري تحميل وتأمين النظام...</h1></div></div>;
+  // حماية حالة التحميل حتى نضمن أن المستخدم غير مسجل أو أن بياناته قد حُملت
+  if (authLoading) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري الاتصال بالنظام...</h1></div></div>;
+  if (user && !profilesLoaded) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري تأمين البيانات...</h1></div></div>;
 
   if (!user) {
-    let clickCount = 0;
-    const handleLogoClick = () => {
-       clickCount++;
-       if(clickCount >= 5) {
-           setIsSetupMode(!isSetupMode);
-           clickCount = 0;
-       }
-    };
-
     return (
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
         <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
           <div className="flex flex-col items-center justify-center mx-auto mb-6 mt-2">
-             <div className="text-center select-none" onClick={handleLogoClick}>
+             <div className="text-center select-none">
                  <span className="block text-3xl font-serif text-slate-800 tracking-wider font-bold mb-1 cursor-default">BASHEER</span>
                  <span className="block text-2xl font-serif text-slate-800 tracking-wider cursor-default">ALSHAKARCHY</span>
                  <div className="w-full h-1 bg-amber-500 mt-2 mb-2 rounded"></div>
                  <span className="block text-xs text-slate-600 tracking-widest font-semibold uppercase cursor-default">Sweets & Cake</span>
              </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">{isSetupMode ? 'إعداد حساب المدير السري' : 'تسجيل الدخول'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">تسجيل الدخول</h1>
           <p className="text-gray-500 mb-6 text-sm">الرجاء إدخال اسم المستخدم وكلمة المرور.</p>
           {authError && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm border border-red-200">{authError}</div>}
           <form onSubmit={handleAuth} className="space-y-4 text-right">
             <input type="text" required value={username} onChange={e => setUsername(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="اسم المستخدم" />
             <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 dir-ltr text-right" placeholder="••••••••" minLength="6" />
-            <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">{isSetupMode ? 'إنشاء حساب المدير' : 'دخول'}</button>
+            <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg transition-colors mt-2 shadow-md">دخول النظام</button>
           </form>
         </div>
       </div>
     );
   }
 
-  // الحماية القصوى لصفحة إكمال الملف الشخصي
+  // الحماية القصوى لصفحة إكمال الملف الشخصي - تم إزالتها واستبدالها بحاجز صد
   if (user && !myProfile) {
-    const isFirstUser = profiles.length === 0;
-    
-    if (isFirstUser) {
-      return (
-        <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
-          <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border border-gray-100">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">إعداد النظام لأول مرة</h1>
-            <p className="text-gray-500 mb-6 text-sm">مرحباً بك في نظام مصنع بشير. الرجاء إدخال اسم المدير العام للبدء.</p>
-            <form onSubmit={handleJoin} className="space-y-4 text-right">
-              <input type="text" required value={joinName} onChange={e => setJoinName(e.target.value)} placeholder="اسم المدير (مثال: بشير الشكرچي)" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
-              <button type="submit" className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-lg shadow-md transition-all">تفعيل النظام</button>
-            </form>
-          </div>
-        </div>
-      );
-    } else {
-      return (
-        <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
-          <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-red-500">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-               <ShieldCheck size={32} className="text-red-600" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">وصول غير مصرح</h1>
-            <p className="text-gray-600 mb-6 text-sm leading-relaxed">هذا الحساب غير مسجل ضمن قائمة الموظفين المعتمدين. لا يمكنك الدخول للنظام إلا بعد أن يقوم المدير العام بإنشاء ملف لك.</p>
-            <button onClick={() => signOut(auth)} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow-md transition-all">تسجيل الخروج</button>
-          </div>
-        </div>
-      );
-    }
+     return (
+       <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
+         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-red-500">
+           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <ShieldCheck size={32} className="text-red-600" />
+           </div>
+           <h1 className="text-2xl font-bold text-gray-900 mb-2">وصول غير مصرح</h1>
+           <p className="text-gray-600 mb-6 text-sm leading-relaxed">هذا الحساب غير مسجل ضمن قائمة الموظفين المعتمدين. لا يمكنك الدخول للنظام إلا بعد أن يقوم المدير بإنشاء ملف لك.</p>
+           <button onClick={() => signOut(auth)} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow-md transition-all">تسجيل الخروج</button>
+         </div>
+       </div>
+     );
   }
 
   const isProductionPrint = printData?.printType === 'production';
