@@ -106,12 +106,17 @@ const compressImage = (file, maxWidth = 800) => {
 };
 
 const getOrderItems = (order) => {
-  if (order?.items && Array.isArray(order.items) && order.items.length > 0) return order.items;
+  if (order?.items && Array.isArray(order.items) && order.items.length > 0) {
+      return order.items.map(i => ({
+          ...i,
+          itemImages: i.itemImages || (i.itemImage ? [i.itemImage] : [])
+      }));
+  }
   return [{
      id: order?.id || Date.now(), cakeCategory: order?.cakeCategory || '', cakeSize: order?.cakeSize || '',
      customCakeType: order?.customCakeType || '', quantity: order?.quantity || 1, weight: order?.weight || '',
      price: order?.price || 0, orderSource: order?.orderSource || 'manufacturing', selectedFG: order?.selectedFG || '',
-     itemNotes: order?.notes || '', itemImage: (order?.images && order.images.length > 0) ? order.images[0] : ''
+     itemNotes: order?.notes || '', itemImages: (order?.images && order.images.length > 0) ? order.images : []
   }];
 };
 
@@ -222,10 +227,12 @@ export default function App() {
   const prevOrderCount = useRef(0);
   
   const [activeTab, setActiveTab] = useState('Orders');
+  const [joinName, setJoinName] = useState('');
   const [printData, setPrintData] = useState(null);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isSetupMode, setIsSetupMode] = useState(false);
   const [authError, setAuthError] = useState('');
 
   const showNotification = (message) => {
@@ -424,7 +431,7 @@ export default function App() {
       return Object.values(custMap);
     }, [orders]);
 
-    const initialItemState = { id: Date.now(), orderSource: 'manufacturing', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '', quantity: 1, weight: '', price: '', selectedFG: '', itemNotes: '', itemImage: '' };
+    const initialItemState = { id: Date.now(), orderSource: 'manufacturing', cakeCategory: 'قالب كيك ايطالي', cakeSize: 'ايطالي ١٢ قطعة', customCakeType: '', quantity: 1, weight: '', price: '', selectedFG: '', itemNotes: '', itemImages: [] };
     
     const [form, setForm] = useState({ 
       customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد',
@@ -448,10 +455,23 @@ export default function App() {
       return true;
     });
 
-    const handleItemImageUpload = async (index, file) => {
-      if(!file) return;
-      const base64Image = await compressImage(file);
-      handleItemChange(index, 'itemImage', base64Image);
+    const handleItemImageUpload = async (index, files) => {
+      if(!files || files.length === 0) return;
+      const newItems = [...form.items];
+      const currentImages = newItems[index].itemImages || [];
+      const uploadedImages = [];
+      for(let i=0; i<files.length; i++) {
+         const base64 = await compressImage(files[i]);
+         uploadedImages.push(base64);
+      }
+      newItems[index].itemImages = [...currentImages, ...uploadedImages];
+      setForm({ ...form, items: newItems });
+    };
+
+    const removeImage = (itemIndex, imgIndex) => {
+       const newItems = [...form.items];
+       newItems[itemIndex].itemImages.splice(imgIndex, 1);
+       setForm({ ...form, items: newItems });
     };
 
     const handleEdit = (order) => {
@@ -489,23 +509,24 @@ export default function App() {
           if (fgItem) {
              newItems[index].cakeCategory = fgItem.name;
              newItems[index].cakeSize = 'جاهز من المخزن';
-             newItems[index].price = Number(fgItem.price || 0) * Number(newItems[index].quantity || 1);
-             if(fgItem.image) newItems[index].itemImage = fgItem.image;
+             newItems[index].price = Number(fgItem.price || 0);
+             if(fgItem.image) newItems[index].itemImages = [fgItem.image];
           }
        }
-       if (field === 'quantity' && newItems[index].orderSource === 'ready_made' && newItems[index].selectedFG) {
-          const fgItem = finishedGoods.find(g => g.id === newItems[index].selectedFG);
-          if (fgItem) newItems[index].price = Number(fgItem.price || 0) * Number(value);
-       }
        
-       const autoTotal = newItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
+       const autoTotal = newItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 1)), 0);
        setForm({ ...form, items: newItems, totalPrice: autoTotal });
     };
 
-    const addItem = () => setForm({ ...form, items: [...form.items, { ...initialItemState, id: Date.now() }] });
+    const addItem = () => {
+       const newItems = [...form.items, { ...initialItemState, id: Date.now() }];
+       const autoTotal = newItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 1)), 0);
+       setForm({ ...form, items: newItems, totalPrice: autoTotal });
+    };
+    
     const removeItem = (index) => {
        const newItems = form.items.filter((_, i) => i !== index);
-       const autoTotal = newItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
+       const autoTotal = newItems.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 1)), 0);
        setForm({ ...form, items: newItems, totalPrice: autoTotal });
     };
 
@@ -565,7 +586,7 @@ export default function App() {
         <Table headers={['الصور', 'رقم الطلب', 'العميل والدفع', 'الأصناف', 'الموعد', 'الحالة', 'إجراء']}>
           {filteredOrders.map(o => {
             const items = getOrderItems(o);
-            const displayImg = o.finalImage ? o.finalImage : (items[0]?.itemImage || (o.images && o.images[0]));
+            const displayImg = o.finalImage ? o.finalImage : (items[0]?.itemImages?.[0] || items[0]?.itemImage || (o.images && o.images[0]));
             return (
             <tr key={o.id} className="hover:bg-gray-50 transition-colors">
               <td className="p-4">
@@ -695,7 +716,7 @@ export default function App() {
                            <div className="grid grid-cols-3 gap-3">
                               <div><label className="block text-xs font-bold text-gray-700 mb-1">الكمية</label><input type="number" required min="1" value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-amber-500" /></div>
                               <div><label className="block text-xs font-bold text-gray-700 mb-1">الوزن (اختياري)</label><input type="text" value={item.weight} onChange={e => handleItemChange(index, 'weight', e.target.value)} className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-amber-500" placeholder="مثال: 2 كجم" /></div>
-                              <div><label className="block text-xs font-bold text-amber-700 mb-1">سعر الصنف (IQD)</label><input type="number" required min="0" step="1" value={item.price} onChange={e => handleItemChange(index, 'price', e.target.value)} className="w-full p-2.5 border border-amber-300 bg-amber-50 rounded-lg outline-none focus:ring-2 focus:ring-amber-500 font-bold" /></div>
+                              <div><label className="block text-xs font-bold text-amber-700 mb-1">سعر القطعة الواحدة (IQD)</label><input type="number" required min="0" step="1" value={item.price} onChange={e => handleItemChange(index, 'price', e.target.value)} className="w-full p-2.5 border border-amber-300 bg-amber-50 rounded-lg outline-none focus:ring-2 focus:ring-amber-500 font-bold" /></div>
                            </div>
                            <div>
                               <label className="block text-xs font-bold text-gray-700 mb-1">ملاحظات خاصة بهذا الصنف (تظهر للمعمل)</label>
@@ -703,27 +724,28 @@ export default function App() {
                            </div>
                         </div>
                         
-                        <div className="md:col-span-4 border-r border-gray-100 pr-4 flex flex-col justify-center items-center">
-                           <label className="block text-xs font-bold text-gray-700 mb-2 text-center">صورة التصميم</label>
-                           {item.itemImage ? (
-                              <div className="relative w-full max-w-[150px] aspect-square group">
-                                 <img src={item.itemImage} className="w-full h-full object-cover rounded-xl border-2 border-amber-200 shadow-sm cursor-pointer" alt="item ref" onClick={() => setZoomedImage(item.itemImage)} title="تكبير الصورة" />
-                                 <button type="button" onClick={() => handleItemChange(index, 'itemImage', '')} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow"><Trash2 size={14}/></button>
+                        <div className="md:col-span-4 border-r border-gray-100 pr-4 flex flex-col items-center justify-center">
+                           <label className="block text-xs font-bold text-gray-700 mb-2 text-center">صور التصميم (يمكنك رفع أكثر من صورة)</label>
+                           <div className="flex flex-wrap gap-2 justify-center w-full">
+                              {(item.itemImages || []).map((img, imgIdx) => (
+                                 <div key={imgIdx} className="relative w-16 h-16 group">
+                                    <img src={img} className="w-full h-full object-cover rounded-lg border border-amber-200 shadow-sm cursor-pointer" alt="item ref" onClick={() => setZoomedImage(img)} title="تكبير الصورة" />
+                                    <button type="button" onClick={() => removeImage(index, imgIdx)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow"><X size={12}/></button>
+                                 </div>
+                              ))}
+                              <div className="w-16 h-16 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center relative hover:bg-gray-100 transition-colors cursor-pointer">
+                                 <Plus size={20} className="text-gray-400 mb-1"/>
+                                 <span className="text-[9px] font-bold text-gray-500 text-center">إضافة</span>
+                                 <input type="file" multiple accept="image/*" onChange={e => handleItemImageUpload(index, e.target.files)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                               </div>
-                           ) : (
-                              <div className="w-full max-w-[150px] aspect-square bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center relative hover:bg-gray-100 transition-colors cursor-pointer">
-                                 <UploadCloud size={24} className="text-gray-400 mb-2"/>
-                                 <span className="text-xs font-bold text-gray-500 text-center px-2">اضغط لرفع<br/>صورة</span>
-                                 <input type="file" accept="image/*" onChange={e => handleItemImageUpload(index, e.target.files[0])} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                              </div>
-                           )}
+                           </div>
                         </div>
                      </div>
                   </div>
                ))}
                
                <div className="flex justify-between items-center mt-6 bg-white p-4 rounded-xl border-2 border-amber-500 shadow-md">
-                  <span className="font-bold text-amber-900 text-lg">المبلغ الإجمالي الكلي للطلب:</span>
+                  <span className="font-bold text-amber-900 text-lg">المبلغ الإجمالي الكلي للطلب (محسوب تلقائياً):</span>
                   <div className="flex items-center gap-2">
                      <input type="number" required min="0" step="1" value={form.totalPrice} onChange={e => setForm({...form, totalPrice: e.target.value})} className="w-32 md:w-48 p-2 border-b-2 border-amber-500 text-center font-bold text-2xl text-amber-900 outline-none bg-transparent" />
                      <span className="font-bold text-amber-700">IQD</span>
@@ -774,22 +796,28 @@ export default function App() {
            <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 space-y-3">
               <p className="text-sm font-bold text-amber-900 border-b border-amber-200 pb-2 mb-3">الأصناف المطلوبة ({items.length}):</p>
               {items.map((i, idx) => (
-                <div key={idx} className="flex gap-4 bg-white p-3 rounded-lg border border-amber-100 shadow-sm">
-                   {i.itemImage ? (
-                      <div className="relative cursor-pointer group flex-shrink-0" onClick={() => setZoomedImage(i.itemImage)}>
-                         <img src={i.itemImage} className="w-16 h-16 object-cover rounded border shadow-sm" alt="item" />
-                         <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity rounded flex items-center justify-center"><ZoomIn size={16} className="text-white"/></div>
-                      </div>
-                   ) : (
-                      <div className="w-16 h-16 bg-gray-50 border rounded flex items-center justify-center text-gray-300 flex-shrink-0"><Cake size={24}/></div>
-                   )}
-                   <div className="flex-1">
-                     <div className="flex justify-between items-start mb-1">
-                        <p className="font-bold text-amber-900 text-sm">{i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</p>
-                        <span className="bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold text-xs shadow-sm">{i.quantity} ق</span>
-                     </div>
-                     <p className="text-xs text-amber-700 mb-1">{i.cakeSize} {i.weight && `| ${i.weight}`} {i.orderSource==='ready_made'&&<span className="bg-green-100 text-green-700 px-1 rounded mx-1">مخزن</span>}</p>
-                     {i.itemNotes && <p className="text-xs text-gray-600 bg-gray-50 p-1.5 rounded border border-gray-100"><span className="font-bold">ملاحظات:</span> {i.itemNotes}</p>}
+                <div key={idx} className="bg-white p-3 rounded-lg border border-amber-100 shadow-sm flex flex-col">
+                   <div className="flex gap-4">
+                       <div className="flex-1">
+                         <div className="flex justify-between items-start mb-1">
+                            <p className="font-bold text-amber-900 text-sm">{i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</p>
+                            <span className="bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold text-xs shadow-sm">{i.quantity} ق</span>
+                         </div>
+                         <p className="text-xs text-amber-700 mb-1">{i.cakeSize} {i.weight && `| ${i.weight}`} {i.orderSource==='ready_made'&&<span className="bg-green-100 text-green-700 px-1 rounded mx-1">مخزن</span>}</p>
+                         {i.itemNotes && <p className="text-xs text-gray-600 bg-gray-50 p-1.5 rounded border border-gray-100"><span className="font-bold">ملاحظات:</span> {i.itemNotes}</p>}
+                       </div>
+                   </div>
+                   {/* عرض مجموعة الصور */}
+                   <div className="flex gap-2 mt-2 overflow-x-auto pb-2 custom-scrollbar">
+                      {(i.itemImages && i.itemImages.length > 0 ? i.itemImages : (i.itemImage ? [i.itemImage] : [])).map((img, imgIdx) => (
+                         <div key={imgIdx} className="relative cursor-pointer group flex-shrink-0" onClick={() => setZoomedImage(img)}>
+                            <img src={img} className="w-16 h-16 object-cover rounded border shadow-sm" alt="item" />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity rounded flex items-center justify-center"><ZoomIn size={16} className="text-white"/></div>
+                         </div>
+                      ))}
+                      {(!i.itemImages || i.itemImages.length === 0) && !i.itemImage && (
+                         <div className="w-16 h-16 bg-gray-50 border rounded flex items-center justify-center text-gray-300 flex-shrink-0"><Cake size={24}/></div>
+                      )}
                    </div>
                 </div>
               ))}
@@ -991,7 +1019,7 @@ export default function App() {
     const renderOrderCard = (o, type) => {
       const items = getOrderItems(o);
       const displayTitle = items.length > 1 ? `طلب متعدد (${items.length} أصناف)` : (items[0].cakeCategory === 'أخرى (إدخال يدوي)' ? items[0].customCakeType : items[0].cakeCategory);
-      const displayImg = items[0]?.itemImage || (o.images && o.images[0]);
+      const displayImg = o.finalImage ? o.finalImage : (items[0]?.itemImages?.[0] || items[0]?.itemImage || (o.images && o.images[0]));
       return (
          <div key={o.id} onClick={() => {setSelectedOrder(o); setOrderType(type);}} className={`p-3 border rounded-xl relative shadow-sm cursor-pointer transition-all flex flex-col text-center ${type === 'production_pending' ? 'border-yellow-200 bg-yellow-50 hover:bg-yellow-100' : 'border-orange-200 bg-orange-50 hover:bg-orange-100'}`}>
             <span className="font-mono font-bold text-gray-500 text-xs mb-1">#{formatOrderNum(o)}</span>
@@ -1144,7 +1172,7 @@ export default function App() {
       const baseOrderData = {
         items: [{
            id: Date.now(), cakeCategory: selectedItem.name, cakeSize: 'جاهز من المخزن', 
-           quantity: sellQty, price: totalRevenue, orderSource: 'ready_made', selectedFG: selectedItem.id, itemImage: selectedItem.image || ''
+           quantity: sellQty, price: selectedItem.price, orderSource: 'ready_made', selectedFG: selectedItem.id, itemImages: selectedItem.image ? [selectedItem.image] : []
         }],
         price: totalRevenue, createdAt: now, orderNumber: Date.now() % 10000,
         images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, paymentType: sellForm.paymentType, cashStatus: orderCashStatus,
@@ -2255,7 +2283,6 @@ export default function App() {
 
   // --- واجهات التحميل والدخول ---
 
-  // حماية حالة التحميل حتى نضمن أن المستخدم غير مسجل أو أن بياناته قد حُملت
   if (authLoading) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري الاتصال بالنظام...</h1></div></div>;
   if (user && !profilesLoaded) return <div className="flex h-screen w-full items-center justify-center bg-gray-50" dir="rtl"><div className="flex flex-col items-center animate-pulse"><Cake size={48} className="text-amber-600 mb-4" /><h1 className="text-xl font-bold text-gray-700">جاري تأمين البيانات...</h1></div></div>;
 
@@ -2285,7 +2312,6 @@ export default function App() {
     );
   }
 
-  // الحماية القصوى لصفحة إكمال الملف الشخصي - تم إزالتها واستبدالها بحاجز صد
   if (user && !myProfile) {
      return (
        <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
@@ -2374,9 +2400,14 @@ export default function App() {
                <div className="space-y-4">
                  {getOrderItems(printData).map((i, idx) => (
                     <div key={idx} className="flex gap-4 items-start border-b border-gray-100 pb-3 last:border-0 last:pb-0">
-                       {i.itemImage ? (
-                          <img src={i.itemImage} className="w-20 h-20 object-cover rounded border border-gray-300" alt="item" />
-                       ) : <div className="w-20 h-20 bg-gray-100 border rounded flex items-center justify-center text-gray-300"><ImageIcon size={24}/></div>}
+                       <div className="flex gap-2 flex-wrap max-w-[120px]">
+                          {(i.itemImages && i.itemImages.length > 0 ? i.itemImages : (i.itemImage ? [i.itemImage] : [])).map((img, imgIdx) => (
+                             <img key={imgIdx} src={img} className="w-16 h-16 object-cover rounded border border-gray-300" alt="item" />
+                          ))}
+                          {(!i.itemImages || i.itemImages.length === 0) && !i.itemImage && (
+                             <div className="w-16 h-16 bg-gray-100 border rounded flex items-center justify-center text-gray-300"><ImageIcon size={24}/></div>
+                          )}
+                       </div>
                        
                        <div className="flex-1">
                           <p className="font-bold text-lg">{i.quantity}x {i.cakeCategory === 'أخرى (إدخال يدوي)' ? i.customCakeType : i.cakeCategory}</p>
