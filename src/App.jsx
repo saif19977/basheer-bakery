@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { 
   Cake, LayoutDashboard, ShoppingCart, ChefHat, 
   Store as StoreIcon, Truck, DollarSign, Users, 
   Plus, X, CheckCircle, TrendingUp, Package, Clock, AlertCircle,
   Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck,
-  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent, Lock
+  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent, Lock, Loader2
 } from 'lucide-react';
 
+// --- صائد الأخطاء لمنع الشاشة البيضاء ---
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -38,6 +40,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// --- إعدادات فايربيس ---
 const firebaseConfig = {
   apiKey: "AIzaSyBxH2YVMpjJ4Gy7GDqtTKJz1FT34lA0M1s",
   authDomain: "cakeshop-88377.firebaseapp.com",
@@ -51,8 +54,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app); // تفعيل مخزن الصور السحابي
 const appId = 'cakeshop-production';
 
+// --- دوال الحماية والمساعدة ---
 const safeStr = (val) => {
   if (val === null || val === undefined) return '';
   return String(val).toLowerCase().trim();
@@ -67,11 +72,9 @@ const formatDate = (dateStr) => {
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return 'تاريخ غير صالح';
-    // التوقيت مبرمج حصراً على بغداد مع إظهار اليوم بدقة
     return d.toLocaleString('ar-IQ', { 
        timeZone: 'Asia/Baghdad',
-       weekday: 'long',
-       year: 'numeric', month: 'short', day: 'numeric', 
+       weekday: 'long', year: 'numeric', month: 'short', day: 'numeric', 
        hour: '2-digit', minute: '2-digit', hour12: true 
     });
   } catch(e) {
@@ -88,7 +91,8 @@ const formatOrderNum = (order) => {
 
 const getSystemEmail = (userStr) => `${String(userStr || '').trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
 
-const compressImage = (file, maxWidth = 600) => {
+// ضغط الصور السريع قبل رفعها للستورج
+const compressImage = (file, maxWidth = 800) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -109,12 +113,7 @@ const compressImage = (file, maxWidth = 600) => {
 };
 
 const getOrderItems = (order) => {
-  if (order?.items && Array.isArray(order.items) && order.items.length > 0) {
-      return order.items.map(i => ({
-          ...i,
-          itemImages: i.itemImages || (i.itemImage ? [i.itemImage] : [])
-      }));
-  }
+  if (order?.items && Array.isArray(order.items) && order.items.length > 0) return order.items;
   return [{
      id: order?.id || Date.now(), cakeCategory: order?.cakeCategory || '', cakeSize: order?.cakeSize || '',
      customCakeType: order?.customCakeType || '', quantity: order?.quantity || 1, weight: order?.weight || '',
@@ -123,9 +122,11 @@ const getOrderItems = (order) => {
   }];
 };
 
+// --- إنشاء Context ---
 const AppContext = createContext(null);
 const useAppContext = () => useContext(AppContext);
 
+// --- المكونات المرئية المشتركة ---
 const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
   if (!isOpen) return null;
   return (
@@ -212,6 +213,10 @@ const Countdown = ({ deliveryDate }) => {
   );
 };
 
+// ==========================================
+// مكونات الصفحات
+// ==========================================
+
 const DashboardView = () => {
   const { orders, finishedGoods, inventory, setActiveTab } = useAppContext();
   const pendingCount = orders.filter(o => o?.status === 'pending' || o?.status === 'baking').length;
@@ -251,13 +256,14 @@ const DashboardView = () => {
 };
 
 const OrdersView = () => {
-  const { orders, finishedGoods, dynamicCategories, isManagerOrAdmin, showNotification, setPrintData, setZoomedImage, user, myProfile } = useAppContext();
+  const { orders, finishedGoods, dynamicCategories, isManagerOrAdmin, showNotification, setPrintData, setZoomedImage, user, myProfile, uploadToStorage } = useAppContext();
   
   const [isModalOpen, setModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('active');
   const [editingId, setEditingId] = useState(null);
   const [cancelModal, setCancelModal] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
   
   const uniqueCustomers = useMemo(() => {
     const custMap = {};
@@ -306,15 +312,19 @@ const OrdersView = () => {
 
   const handleItemImageUpload = async (index, files) => {
     if(!files || files.length === 0) return;
+    showNotification("⏳ جاري رفع الصور...");
     const newItems = [...form.items];
     const currentImages = newItems[index].itemImages || [];
     const uploadedImages = [];
+    
     for(let i=0; i<files.length; i++) {
-       const base64 = await compressImage(files[i]);
-       uploadedImages.push(base64);
+       const url = await uploadToStorage(files[i]);
+       if(url) uploadedImages.push(url);
     }
+    
     newItems[index].itemImages = [...currentImages, ...uploadedImages];
     setForm({ ...form, items: newItems });
+    if(uploadedImages.length > 0) showNotification("✅ تم رفع الصور بنجاح!");
   };
 
   const removeImage = (itemIndex, imgIndex) => {
@@ -335,18 +345,24 @@ const OrdersView = () => {
   };
 
   const confirmCancelOrder = async () => {
+      if(isProcessing) return;
       const order = cancelModal;
       if(!order) return;
-      const items = getOrderItems(order);
-      for(const item of items) {
-         if(item.orderSource === 'ready_made' && item.selectedFG) {
-            const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
-            if(fgItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: Number(fgItem.quantity || 0) + Number(item.quantity || 0) });
-         }
+      setIsProcessing(true);
+      try {
+          const items = getOrderItems(order);
+          for(const item of items) {
+             if(item.orderSource === 'ready_made' && item.selectedFG) {
+                const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
+                if(fgItem) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: Number(fgItem.quantity || 0) + Number(item.quantity || 0) });
+             }
+          }
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'cancelled', updatedAt: new Date().toISOString() });
+          showNotification('تم إلغاء الطلب واسترجاع الكميات للمخزن التام.');
+          setCancelModal(null);
+      } finally {
+          setIsProcessing(false);
       }
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'cancelled', updatedAt: new Date().toISOString() });
-      showNotification('تم إلغاء الطلب واسترجاع الكميات للمخزن التام.');
-      setCancelModal(null);
   };
 
   const calculateTotal = (items, delivery) => {
@@ -386,38 +402,45 @@ const OrdersView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    let finalForm = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes, deliveryFee: Number(form.deliveryFee || 0) };
-    
-    if (!editingId) {
-       for (let item of finalForm.items) {
-          if (item.orderSource === 'ready_made') {
-             const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
-             if (!fgItem || Number(fgItem.quantity || 0) < Number(item.quantity || 1)) {
-                showNotification(`❌ الكمية المطلوبة من الصنف "${item.cakeCategory}" غير متوفرة في المخزن التام!`);
-                return;
-             }
-             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: Number(fgItem.quantity) - Number(item.quantity) });
-          }
-       }
-    }
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        let finalForm = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes, deliveryFee: Number(form.deliveryFee || 0) };
+        
+        if (!editingId) {
+           for (let item of finalForm.items) {
+              if (item.orderSource === 'ready_made') {
+                 const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
+                 if (!fgItem || Number(fgItem.quantity || 0) < Number(item.quantity || 1)) {
+                    showNotification(`❌ الكمية المطلوبة من الصنف "${item.cakeCategory}" غير متوفرة في المخزن التام!`);
+                    setIsProcessing(false);
+                    return;
+                 }
+                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', fgItem.id), { quantity: Number(fgItem.quantity) - Number(item.quantity) });
+              }
+           }
+        }
 
-    const allReadyMade = finalForm.items.every(i => i.orderSource === 'ready_made');
-    const initialStatus = allReadyMade ? 'ready' : 'pending';
-    const orderCashStatus = finalForm.paymentType === 'نقد' ? 'pending_delivery' : 'credit_unpaid';
+        const allReadyMade = finalForm.items.every(i => i.orderSource === 'ready_made');
+        const initialStatus = allReadyMade ? 'ready' : 'pending';
+        const orderCashStatus = finalForm.paymentType === 'نقد' ? 'pending_delivery' : 'credit_unpaid';
 
-    if (editingId) {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', editingId), { ...finalForm, cashStatus: orderCashStatus, updatedAt: new Date().toISOString() });
-    } else {
-      const nextOrderNum = orders.length > 0 ? Math.max(...orders.map(o => Number(o.orderNumber) || 0)) + 1 : 1;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
-        ...finalForm, status: initialStatus, cashStatus: orderCashStatus, createdAt: new Date().toISOString(), orderNumber: nextOrderNum,
-        createdByUid: user.uid, createdByName: myProfile?.name || 'غير معروف'
-      });
-      showNotification("تم حفظ الطلب بنجاح.");
+        if (editingId) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', editingId), { ...finalForm, cashStatus: orderCashStatus, updatedAt: new Date().toISOString() });
+        } else {
+          const nextOrderNum = orders.length > 0 ? Math.max(...orders.map(o => Number(o.orderNumber) || 0)) + 1 : 1;
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
+            ...finalForm, status: initialStatus, cashStatus: orderCashStatus, createdAt: new Date().toISOString(), orderNumber: nextOrderNum,
+            createdByUid: user.uid, createdByName: myProfile?.name || 'غير معروف'
+          });
+          showNotification("تم حفظ الطلب بنجاح.");
+        }
+        setModalOpen(false);
+        setEditingId(null);
+        setForm({ customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد', deliveryDate: '', globalNotes: '', deliveryFee: '', items: [{ ...initialItemState }], totalPrice: 0 });
+    } finally {
+        setIsProcessing(false);
     }
-    setModalOpen(false);
-    setEditingId(null);
-    setForm({ customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد', deliveryDate: '', globalNotes: '', deliveryFee: '', items: [{ ...initialItemState }], totalPrice: 0 });
   };
 
   return (
@@ -460,7 +483,7 @@ const OrdersView = () => {
                   <a href={`tel:${o.phone}`} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-mono hover:bg-blue-100 transition-colors flex items-center gap-1"><Phone size={10}/> اتصال</a>
                   <a href={`https://wa.me/${String(o.phone).replace(/[^0-9+]/g, '')}`} target="_blank" rel="noreferrer" className="text-[10px] bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded hover:bg-green-100 transition-colors flex items-center gap-1"><Phone size={10}/> واتساب</a>
                </div>
-               <p className="text-xs text-gray-700 mt-1 max-w-[200px] break-words leading-relaxed" title={o.address}>{o.address || '-'}</p>
+               <p className="text-xs text-gray-600 mt-1 max-w-[150px] truncate" title={o.address}>{o.address}</p>
             </td>
             <td className="p-4 text-sm text-gray-700">
                {items.map((i, idx) => (
@@ -471,10 +494,7 @@ const OrdersView = () => {
                ))}
                <div className="font-bold text-amber-600 mt-1 border-t pt-1 border-gray-100">الإجمالي: {formatMoney(o.price)} IQD</div>
             </td>
-            <td className="p-4">
-               <div className="text-xs font-bold text-gray-700 mb-1">{formatDate(o.deliveryDate)}</div>
-               <Countdown deliveryDate={o.deliveryDate} />
-            </td>
+            <td className="p-4"><Countdown deliveryDate={o.deliveryDate} /></td>
             <td className="p-4"><StatusBadge status={o.status || 'pending'} /></td>
             <td className="p-4 flex gap-2">
               <button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors" title="طباعة الفاتورة"><Printer size={18} /></button>
@@ -492,8 +512,8 @@ const OrdersView = () => {
         <div className="space-y-4">
           <p className="text-gray-700">هل أنت متأكد من رغبتك في إلغاء هذا الطلب نهائياً؟ (سيتم استرجاع الكميات المسحوبة من المخزن التام تلقائياً)</p>
           <div className="flex gap-3">
-            <button onClick={confirmCancelOrder} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors">نعم، إلغاء الطلب</button>
-            <button type="button" onClick={() => setCancelModal(null)} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            <button onClick={confirmCancelOrder} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الإلغاء...' : 'نعم، إلغاء الطلب'}</button>
+            <button type="button" onClick={() => setCancelModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
           </div>
         </div>
       </Modal>
@@ -616,8 +636,8 @@ const OrdersView = () => {
             <textarea value={form.globalNotes} onChange={e => setForm({...form, globalNotes: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" rows="2" placeholder="مثال: يرجى الاتصال قبل الوصول بنصف ساعة..."></textarea>
           </div>
           
-          <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl mt-6 transition-colors text-lg shadow-lg">
-            {editingId ? "حفظ التعديلات" : "تأكيد واعتماد الطلب"}
+          <button type="submit" disabled={isProcessing} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold py-4 rounded-xl mt-6 transition-colors text-lg shadow-lg flex items-center justify-center gap-2">
+            {isProcessing ? <><Loader2 className="animate-spin" size={24} /> جاري المعالجة...</> : (editingId ? "حفظ التعديلات" : "تأكيد واعتماد الطلب")}
           </button>
         </form>
       </Modal>
@@ -625,7 +645,7 @@ const OrdersView = () => {
   );
 };
 
-const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSecondaryAction }) => {
+const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSecondaryAction, isProcessing }) => {
   const { setZoomedImage } = useAppContext();
   if (!isOpen || !order) return null;
   const hideSensitiveInfo = type ? String(type).includes('production') : false;
@@ -648,11 +668,11 @@ const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSe
               </div>
               <div className="flex items-center gap-2 mb-2">
                  <p className="text-sm text-gray-600 dir-ltr font-mono font-bold">{order.phone || '-'}</p>
-                 <a href={`tel:${order.phone}`} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded hover:bg-blue-100 flex items-center gap-1"><Phone size={10}/></a>
-                 <a href={`https://wa.me/${String(order.phone).replace(/[^0-9+]/g, '')}`} target="_blank" rel="noreferrer" className="text-[10px] bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded hover:bg-green-100 flex items-center gap-1"><Phone size={10}/></a>
+                 <a href={`tel:${order.phone}`} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-mono hover:bg-blue-100 transition-colors flex items-center gap-1"><Phone size={10}/> اتصال</a>
+                 <a href={`https://wa.me/${String(order.phone).replace(/[^0-9+]/g, '')}`} target="_blank" rel="noreferrer" className="text-[10px] bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded hover:bg-green-100 transition-colors flex items-center gap-1"><Phone size={10}/> واتساب</a>
               </div>
-              <p className="text-sm text-gray-700 bg-white p-2 rounded border break-words"><span className="font-bold">العنوان:</span> {order.address || '-'}</p>
-              {order.notes && <p className="mt-2 text-sm text-gray-700 bg-yellow-50 p-2 rounded border border-yellow-200 break-words"><span className="font-bold">ملاحظات التوصيل:</span> {order.notes}</p>}
+              <p className="text-sm text-gray-700 bg-white p-2 rounded border"><span className="font-bold">العنوان:</span> {order.address || '-'}</p>
+              {order.notes && <p className="mt-2 text-sm text-gray-700 bg-yellow-50 p-2 rounded border border-yellow-200"><span className="font-bold">ملاحظات التوصيل:</span> {order.notes}</p>}
             </div>
          )}
 
@@ -670,6 +690,7 @@ const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSe
                        {i.itemNotes && <p className="text-xs text-gray-600 bg-gray-50 p-1.5 rounded border border-gray-100"><span className="font-bold">ملاحظات:</span> {i.itemNotes}</p>}
                      </div>
                  </div>
+                 {/* عرض مجموعة الصور */}
                  <div className="flex gap-2 mt-2 overflow-x-auto pb-2 custom-scrollbar">
                     {(i.itemImages && i.itemImages.length > 0 ? i.itemImages : (i.itemImage ? [i.itemImage] : [])).map((img, imgIdx) => (
                        <div key={imgIdx} className="relative cursor-pointer group flex-shrink-0" onClick={() => setZoomedImage(img)}>
@@ -685,11 +706,7 @@ const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSe
             ))}
          </div>
 
-         <div className="flex flex-col items-center justify-center p-3 bg-gray-50 rounded-xl border border-gray-200">
-            <span className="text-xs font-bold text-gray-500 mb-1">وقت التسليم المطلوب</span>
-            <span className="text-sm font-bold text-gray-800">{formatDate(order.deliveryDate)}</span>
-            <Countdown deliveryDate={order.deliveryDate} />
-         </div>
+         <div className="flex justify-center p-3 bg-gray-50 rounded-xl border border-gray-200"><Countdown deliveryDate={order.deliveryDate} /></div>
 
          {order.finalImage && (
            <div className="bg-green-50 p-4 rounded-xl border border-green-200 mt-4 cursor-pointer hover:bg-green-100 transition-colors" onClick={() => setZoomedImage(order.finalImage)}>
@@ -699,17 +716,17 @@ const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryAction, onSe
          )}
 
          <div className="pt-4 border-t border-gray-100 flex gap-2 flex-wrap">
-            {type === 'production_pending' && <button onClick={() => onPrimaryAction(order)} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2"><Play size={20} /> البدء بالتحضير وخصم المواد</button>}
+            {type === 'production_pending' && <button onClick={() => onPrimaryAction(order)} disabled={isProcessing} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><Play size={20} /> البدء بالتحضير وخصم المواد</>}</button>}
             {type === 'production_baking' && (
-              <><button onClick={() => onPrimaryAction(order)} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2"><CheckCircle size={20} /> تأكيد الإنجاز النهائي</button><button onClick={() => onSecondaryAction(order)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة تذكرة عمل (للمعمل)"><Printer size={20} /></button></>
+              <><button onClick={() => onPrimaryAction(order)} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><CheckCircle size={20} /> تأكيد الإنجاز النهائي</>}</button><button onClick={() => onSecondaryAction(order)} disabled={isProcessing} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة تذكرة عمل (للمعمل)"><Printer size={20} /></button></>
             )}
             {type === 'delivery_dispatch' && (
-              <><button onClick={() => onPrimaryAction(order)} className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2"><Truck size={20} /> إرسال مع السائق</button>
-              <button onClick={() => onSecondaryAction(order)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة فاتورة التوصيل للزبون"><Receipt size={20} /></button></>
+              <><button onClick={() => onPrimaryAction(order)} disabled={isProcessing} className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><Truck size={20} /> إرسال مع السائق</>}</button>
+              <button onClick={() => onSecondaryAction(order)} disabled={isProcessing} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة فاتورة التوصيل للزبون"><Receipt size={20} /></button></>
             )}
             {type === 'delivery_complete' && (
-              <><button onClick={() => onPrimaryAction(order)} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2"><CheckCircle size={20} /> تأكيد التوصيل</button>
-              <button onClick={() => onSecondaryAction(order)} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة فاتورة التوصيل للزبون"><Receipt size={20} /></button></>
+              <><button onClick={() => onPrimaryAction(order)} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white py-3 rounded-lg font-bold shadow-md flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><CheckCircle size={20} /> تأكيد التوصيل</>}</button>
+              <button onClick={() => onSecondaryAction(order)} disabled={isProcessing} className="bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg shadow-md" title="طباعة فاتورة التوصيل للزبون"><Receipt size={20} /></button></>
             )}
             {type === 'delivery_view_only' && (
                <div className="w-full text-center p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg font-bold">هذا الطلب لا يزال في المعمل - يُستخدم هذا العرض للتنسيق مع الزبون فقط.</div>
@@ -784,7 +801,7 @@ const CustomersView = () => {
 };
 
 const ProductionView = () => {
-  const { orders, recipes, inventory, setPrintData, showNotification } = useAppContext();
+  const { orders, recipes, inventory, setPrintData, showNotification, uploadToStorage } = useAppContext();
   const pendingOrders = orders.filter(o => o?.status === 'pending');
   const bakingOrders = orders.filter(o => o?.status === 'baking');
   const completedOrders = orders.filter(o => o && ['ready', 'out_for_delivery', 'completed'].includes(o.status)).slice(0, 10);
@@ -792,8 +809,9 @@ const ProductionView = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderType, setOrderType] = useState(''); 
   const [completionModal, setCompletionModal] = useState({ isOpen: false, order: null, finalImage: '' });
+  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
 
-  // فلترة الطلبات حسب التاريخ لعمل الفولدرات
+  // فلترة الطلبات حسب التاريخ (فولدرات يومية)
   const groupOrdersByDate = (ordersList) => {
      return ordersList.reduce((acc, o) => {
         const dObj = o.deliveryDate ? new Date(o.deliveryDate) : null;
@@ -811,71 +829,77 @@ const ProductionView = () => {
   const groupedBaking = groupOrdersByDate(bakingOrders);
 
   const handleStartBaking = async (order) => {
-     if (order.materialsDeducted) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'baking', updatedAt: new Date().toISOString() });
-        setSelectedOrder(null);
-        showNotification("تم نقل الطلب إلى مرحلة جاري التحضير.");
-        return;
-     }
-
-     let totalCogs = 0;
-     let deductedItemsCount = 0;
-     let missingRecipes = [];
-     let inventoryDeductions = {};
-
-     const items = getOrderItems(order);
-     for(const item of items) {
-         if(item.orderSource === 'manufacturing') {
-            if (item.cakeCategory === 'أخرى (إدخال يدوي)') {
-                missingRecipes.push(item.customCakeType || 'كيك يدوي');
-                continue;
-            }
-
-            const recipe = recipes.find(r => r.cakeCategory === item.cakeCategory && r.cakeSize === item.cakeSize);
-            if(recipe && recipe.materials && recipe.materials.length > 0) {
-               for(const mat of recipe.materials) {
-                  const invItem = inventory.find(inv => inv.id === mat.inventoryId);
-                  if(invItem) {
-                     const qtyToDeduct = Number(mat.qty) * Number(item.quantity);
-                     if (!inventoryDeductions[invItem.id]) {
-                         inventoryDeductions[invItem.id] = { invItem: invItem, qtyToDeduct: 0, totalCost: 0 };
-                     }
-                     inventoryDeductions[invItem.id].qtyToDeduct += qtyToDeduct;
-                     inventoryDeductions[invItem.id].totalCost += (Number(invItem.price || 0) * qtyToDeduct);
-                  }
-               }
-            } else {
-                missingRecipes.push(`${item.cakeCategory} - ${item.cakeSize}`);
-            }
+     if(isProcessing) return;
+     setIsProcessing(true);
+     try {
+         if (order.materialsDeducted) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'baking', updatedAt: new Date().toISOString() });
+            setSelectedOrder(null);
+            showNotification("تم نقل الطلب إلى مرحلة جاري التحضير.");
+            return;
          }
-     }
 
-     for (const invId in inventoryDeductions) {
-         const data = inventoryDeductions[invId];
-         totalCogs += data.totalCost;
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', invId), {
-            quantity: Number(data.invItem.quantity) - data.qtyToDeduct
-         });
-         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory_logs'), {
-            date: new Date().toISOString(), type: 'OUT_PRODUCTION', inventoryId: invId, itemName: data.invItem.itemName, qty: data.qtyToDeduct, price: data.invItem.price, supplier: '-', notes: `استهلاك تصنيع طلب #${formatOrderNum(order)}`
-         });
-         deductedItemsCount++;
-     }
+         let totalCogs = 0;
+         let deductedItemsCount = 0;
+         let missingRecipes = [];
+         let inventoryDeductions = {};
 
-     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
-        status: 'baking', 
-        updatedAt: new Date().toISOString(),
-        cogs: totalCogs,
-        materialsDeducted: true 
-     });
-     setSelectedOrder(null);
-     
-     if (missingRecipes.length > 0) {
-         showNotification(`⚠️ بدأ التحضير، لكن لم تخصم مواد لصنف (${missingRecipes.join('، ')}) لعدم وجود معادلة.`);
-     } else if (deductedItemsCount > 0) {
-         showNotification("✅ تم البدء بالتحضير وخصم المواد من المستودع بنجاح!");
-     } else {
-         showNotification("✅ تم نقل الطلب إلى مرحلة جاري التحضير.");
+         const items = getOrderItems(order);
+         for(const item of items) {
+             if(item.orderSource === 'manufacturing') {
+                if (item.cakeCategory === 'أخرى (إدخال يدوي)') {
+                    missingRecipes.push(item.customCakeType || 'كيك يدوي');
+                    continue;
+                }
+
+                const recipe = recipes.find(r => r.cakeCategory === item.cakeCategory && r.cakeSize === item.cakeSize);
+                if(recipe && recipe.materials && recipe.materials.length > 0) {
+                   for(const mat of recipe.materials) {
+                      const invItem = inventory.find(inv => inv.id === mat.inventoryId);
+                      if(invItem) {
+                         const qtyToDeduct = Number(mat.qty) * Number(item.quantity);
+                         if (!inventoryDeductions[invItem.id]) {
+                             inventoryDeductions[invItem.id] = { invItem: invItem, qtyToDeduct: 0, totalCost: 0 };
+                         }
+                         inventoryDeductions[invItem.id].qtyToDeduct += qtyToDeduct;
+                         inventoryDeductions[invItem.id].totalCost += (Number(invItem.price || 0) * qtyToDeduct);
+                      }
+                   }
+                } else {
+                    missingRecipes.push(`${item.cakeCategory} - ${item.cakeSize}`);
+                }
+             }
+         }
+
+         for (const invId in inventoryDeductions) {
+             const data = inventoryDeductions[invId];
+             totalCogs += data.totalCost;
+             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', invId), {
+                quantity: Number(data.invItem.quantity) - data.qtyToDeduct
+             });
+             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory_logs'), {
+                date: new Date().toISOString(), type: 'OUT_PRODUCTION', inventoryId: invId, itemName: data.invItem.itemName, qty: data.qtyToDeduct, price: data.invItem.price, supplier: '-', notes: `استهلاك تصنيع طلب #${formatOrderNum(order)}`
+             });
+             deductedItemsCount++;
+         }
+
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+            status: 'baking', 
+            updatedAt: new Date().toISOString(),
+            cogs: totalCogs,
+            materialsDeducted: true 
+         });
+         setSelectedOrder(null);
+         
+         if (missingRecipes.length > 0) {
+             showNotification(`⚠️ بدأ التحضير، لكن لم تخصم مواد لصنف (${missingRecipes.join('، ')}) لعدم وجود معادلة.`);
+         } else if (deductedItemsCount > 0) {
+             showNotification("✅ تم البدء بالتحضير وخصم المواد من المستودع بنجاح!");
+         } else {
+             showNotification("✅ تم نقل الطلب إلى مرحلة جاري التحضير.");
+         }
+     } finally {
+         setIsProcessing(false);
      }
   };
 
@@ -887,19 +911,29 @@ const ProductionView = () => {
   const handleCompleteUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      const compressedImage = await compressImage(file);
-      setCompletionModal(prev => ({ ...prev, finalImage: compressedImage }));
+      showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
+      const url = await uploadToStorage(file);
+      if(url) {
+          setCompletionModal(prev => ({ ...prev, finalImage: url }));
+          showNotification("✅ تم رفع الصورة بنجاح!");
+      }
     }
   };
 
   const confirmCompletion = async () => {
-    const order = completionModal.order;
-    const updateData = { status: 'ready', updatedAt: new Date().toISOString() };
-    if (completionModal.finalImage) updateData.finalImage = completionModal.finalImage;
-    
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
-    setCompletionModal({ isOpen: false, order: null, finalImage: '' });
-    showNotification("✅ تم إنجاز الطلب وهو جاهز الآن للتوصيل!");
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        const order = completionModal.order;
+        const updateData = { status: 'ready', updatedAt: new Date().toISOString() };
+        if (completionModal.finalImage) updateData.finalImage = completionModal.finalImage;
+        
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
+        setCompletionModal({ isOpen: false, order: null, finalImage: '' });
+        showNotification("✅ تم إنجاز الطلب وهو جاهز الآن للتوصيل!");
+    } finally {
+        setIsProcessing(false);
+    }
   };
 
   const handlePrintProduction = (order) => {
@@ -987,6 +1021,7 @@ const ProductionView = () => {
          isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={orderType}
          onPrimaryAction={orderType === 'production_pending' ? handleStartBaking : triggerCompletion}
          onSecondaryAction={handlePrintProduction}
+         isProcessing={isProcessing}
       />
 
       <Modal isOpen={completionModal.isOpen} onClose={() => setCompletionModal({ isOpen: false, order: null, finalImage: '' })} title="تأكيد تجهيز الطلب">
@@ -997,7 +1032,7 @@ const ProductionView = () => {
             <input type="file" accept="image/*" onChange={handleCompleteUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
             {completionModal.finalImage && <img src={completionModal.finalImage} alt="final product" className="mt-4 w-full max-h-48 object-contain rounded-lg border shadow-sm mx-auto" />}
           </div>
-          <button onClick={confirmCompletion} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">تأكيد الإنجاز النهائي <CheckCircle size={18}/></button>
+          <button onClick={confirmCompletion} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><CheckCircle size={18}/> تأكيد الإنجاز النهائي</>}</button>
         </div>
       </Modal>
     </div>
@@ -1005,13 +1040,14 @@ const ProductionView = () => {
 };
 
 const FinishedGoodsView = () => {
-  const { finishedGoods, setPrintData, user, myProfile, showNotification } = useAppContext();
+  const { finishedGoods, setPrintData, user, myProfile, showNotification, uploadToStorage } = useAppContext();
   const [isAddModalOpen, setAddModalOpen] = useState(false);
   const [isSellModalOpen, setSellModalOpen] = useState(false);
   const [addStockModal, setAddStockModal] = useState(null);
   const [deleteFGModal, setDeleteFGModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
   
   const [form, setForm] = useState({ code: '', name: '', quantity: 1, price: '', image: '' });
   const [sellQty, setSellQty] = useState(1);
@@ -1023,95 +1059,123 @@ const FinishedGoodsView = () => {
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      const compressedImage = await compressImage(file);
-      setForm(prev => ({ ...prev, image: compressedImage }));
+      showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
+      const url = await uploadToStorage(file);
+      if(url) {
+          setForm(prev => ({ ...prev, image: url }));
+          showNotification("✅ تم رفع الصورة بنجاح!");
+      }
     }
   };
 
   const handleAddItem = async (e) => {
     e.preventDefault();
-    const existingItem = finishedGoods.find(item => String(item.name).trim() === String(form.name).trim() && item.code === form.code);
-    if (existingItem) {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', existingItem.id), {
-        quantity: Number(existingItem.quantity || 0) + Number(form.quantity), price: Number(form.price) || existingItem.price, lastAddedAt: new Date().toISOString()
-      });
-      showNotification(`تم إضافة ${form.quantity} للرصيد السابق.`);
-    } else {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'finished_goods'), {
-        ...form, quantity: Number(form.quantity), price: Number(form.price), addedAt: new Date().toISOString(), lastAddedAt: new Date().toISOString()
-      });
-      showNotification("تم إضافة المنتج الجديد للمخزن التام.");
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        const existingItem = finishedGoods.find(item => String(item.name).trim() === String(form.name).trim() && item.code === form.code);
+        if (existingItem) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', existingItem.id), {
+            quantity: Number(existingItem.quantity || 0) + Number(form.quantity), price: Number(form.price) || existingItem.price, lastAddedAt: new Date().toISOString()
+          });
+          showNotification(`تم إضافة ${form.quantity} للرصيد السابق.`);
+        } else {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'finished_goods'), {
+            ...form, quantity: Number(form.quantity), price: Number(form.price), addedAt: new Date().toISOString(), lastAddedAt: new Date().toISOString()
+          });
+          showNotification("تم إضافة المنتج الجديد للمخزن التام.");
+        }
+        setAddModalOpen(false);
+        setForm({ code: '', name: '', quantity: 1, price: '', image: '' });
+    } finally {
+        setIsProcessing(false);
     }
-    setAddModalOpen(false);
-    setForm({ code: '', name: '', quantity: 1, price: '', image: '' });
   };
 
   const confirmAddStock = async (e) => {
      e.preventDefault();
-     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', addStockModal.id), {
-        quantity: Number(addStockModal.quantity || 0) + addQty,
-        lastAddedAt: new Date().toISOString()
-     });
-     showNotification("تم زيادة رصيد المنتج بنجاح.");
-     setAddStockModal(null);
-     setAddQty(1);
+     if(isProcessing) return;
+     setIsProcessing(true);
+     try {
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', addStockModal.id), {
+            quantity: Number(addStockModal.quantity || 0) + addQty,
+            lastAddedAt: new Date().toISOString()
+         });
+         showNotification("تم زيادة رصيد المنتج بنجاح.");
+         setAddStockModal(null);
+         setAddQty(1);
+     } finally {
+         setIsProcessing(false);
+     }
   };
 
   const confirmDeleteFG = async () => {
-    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', deleteFGModal));
-    showNotification("تم حذف المنتج بنجاح.");
-    setDeleteFGModal(null);
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', deleteFGModal));
+        showNotification("تم حذف المنتج بنجاح.");
+        setDeleteFGModal(null);
+    } finally {
+        setIsProcessing(false);
+    }
   };
 
   const handleSell = async (e) => {
     e.preventDefault();
+    if(isProcessing) return;
     if (sellQty > Number(selectedItem.quantity || 0)) { showNotification("❌ الكمية المطلوبة أكبر من المتوفر!"); return; }
     
-    const newQty = Number(selectedItem.quantity || 0) - sellQty;
-    const totalRevenue = sellQty * Number(selectedItem.price || 0);
-    const now = new Date().toISOString();
-    const orderCashStatus = sellForm.paymentType === 'نقد' ? 'pending_delivery' : 'credit_unpaid';
+    setIsProcessing(true);
+    try {
+        const newQty = Number(selectedItem.quantity || 0) - sellQty;
+        const totalRevenue = sellQty * Number(selectedItem.price || 0);
+        const now = new Date().toISOString();
+        const orderCashStatus = sellForm.paymentType === 'نقد' ? 'pending_delivery' : 'credit_unpaid';
 
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', selectedItem.id), { quantity: newQty });
-    
-    const baseOrderData = {
-      items: [{
-         id: Date.now(), cakeCategory: selectedItem.name, cakeSize: 'جاهز من المخزن', 
-         quantity: sellQty, price: selectedItem.price, orderSource: 'ready_made', selectedFG: selectedItem.id, itemImages: selectedItem.image ? [selectedItem.image] : []
-      }],
-      price: totalRevenue, createdAt: now, orderNumber: Date.now() % 10000,
-      images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, paymentType: sellForm.paymentType, cashStatus: orderCashStatus,
-      createdByUid: user.uid, createdByName: myProfile?.name || 'غير معروف'
-    };
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', selectedItem.id), { quantity: newQty });
+        
+        const baseOrderData = {
+          items: [{
+             id: Date.now(), cakeCategory: selectedItem.name, cakeSize: 'جاهز من المخزن', 
+             quantity: sellQty, price: totalRevenue, orderSource: 'ready_made', selectedFG: selectedItem.id, itemImages: selectedItem.image ? [selectedItem.image] : []
+          }],
+          price: totalRevenue, createdAt: now, orderNumber: Date.now() % 10000,
+          images: selectedItem.image ? [selectedItem.image] : [], deliveryDate: now, paymentType: sellForm.paymentType, cashStatus: orderCashStatus,
+          createdByUid: user.uid, createdByName: myProfile?.name || 'غير معروف'
+        };
 
-    if (sellForm.type === 'direct') {
-      if(sellForm.paymentType === 'نقد') {
-         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { category: 'revenue', type: 'income', amount: totalRevenue, description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now });
-      }
-      const receiptData = {
-        ...baseOrderData, id: 'DIR-' + Date.now().toString().slice(-6),
-        customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد', contactMethod: 'مباشر',
-        status: 'completed', completedAt: now, printType: 'receipt', cashStatus: sellForm.paymentType === 'نقد' ? 'received_by_finance' : 'credit_unpaid',
-        receivedByUid: user.uid, receivedByName: myProfile?.name || 'غير معروف' 
-      };
+        if (sellForm.type === 'direct') {
+          if(sellForm.paymentType === 'نقد') {
+             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { category: 'revenue', type: 'income', amount: totalRevenue, description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now });
+          }
+          const receiptData = {
+            ...baseOrderData, id: 'DIR-' + Date.now().toString().slice(-6),
+            customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد', contactMethod: 'مباشر',
+            status: 'completed', completedAt: now, printType: 'receipt', cashStatus: sellForm.paymentType === 'نقد' ? 'received_by_finance' : 'credit_unpaid',
+            receivedByUid: user.uid, receivedByName: myProfile?.name || 'غير معروف' 
+          };
 
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
-      showNotification("تم إخراج المنتج وتسجيل البيع بنجاح.");
-      setPrintData(receiptData); 
-    } else {
-      const deliveryOrderData = {
-        ...baseOrderData,
-        customerName: sellForm.customerName, phone: sellForm.phone, address: sellForm.address, contactMethod: 'مباشر',
-        status: 'ready' 
-      };
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), deliveryOrderData);
-      showNotification("تم سحب المنتج وتحويله لقسم التوصيل بنجاح.");
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
+          showNotification("تم إخراج المنتج وتسجيل البيع بنجاح.");
+          setPrintData(receiptData); 
+        } else {
+          const deliveryOrderData = {
+            ...baseOrderData,
+            customerName: sellForm.customerName, phone: sellForm.phone, address: sellForm.address, contactMethod: 'مباشر',
+            status: 'ready' 
+          };
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), deliveryOrderData);
+          showNotification("تم سحب المنتج وتحويله لقسم التوصيل بنجاح.");
+        }
+
+        setSellModalOpen(false);
+        setSelectedItem(null);
+        setSellQty(1);
+        setSellForm({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
+    } finally {
+        setIsProcessing(false);
     }
-
-    setSellModalOpen(false);
-    setSelectedItem(null);
-    setSellQty(1);
-    setSellForm({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
   };
 
   return (
@@ -1150,8 +1214,8 @@ const FinishedGoodsView = () => {
         <div className="space-y-4">
           <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذا المنتج نهائياً من المخزن التام؟</p>
           <div className="flex gap-3">
-            <button onClick={confirmDeleteFG} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors">نعم، احذف المنتج</button>
-            <button onClick={() => setDeleteFGModal(null)} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            <button onClick={confirmDeleteFG} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الحذف...' : 'نعم، احذف المنتج'}</button>
+            <button onClick={() => setDeleteFGModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
           </div>
         </div>
       </Modal>
@@ -1166,7 +1230,7 @@ const FinishedGoodsView = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">الكمية الجديدة المراد إضافتها للرصيد</label>
               <input type="number" required min="1" step="1" value={addQty} onChange={e => setAddQty(Number(e.target.value))} className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" />
            </div>
-           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg mt-2 transition-colors flex justify-center items-center gap-2"><Plus size={18}/> تحديث الرصيد</button>
+           <button type="submit" disabled={isProcessing} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-2 transition-colors flex justify-center items-center gap-2">{isProcessing ? 'جاري التحديث...' : <><Plus size={18}/> تحديث الرصيد</>}</button>
         </form>
       </Modal>
 
@@ -1179,7 +1243,7 @@ const FinishedGoodsView = () => {
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر البيع للقطعة (IQD)</label><input type="number" required min="0" step="1" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50" />{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
-          <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg mt-4 transition-colors">تأكيد الإضافة</button>
+          <button type="submit" disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors">{isProcessing ? 'جاري الإضافة...' : 'تأكيد الإضافة'}</button>
         </form>
       </Modal>
 
@@ -1213,8 +1277,8 @@ const FinishedGoodsView = () => {
               <p className="text-2xl font-bold">{formatMoney(sellQty * Number(selectedItem.price || 0))} IQD</p>
             </div>
 
-            <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
-               {sellForm.type === 'direct' ? <><Printer size={18}/> تأكيد الفاتورة والخصم</> : <><Truck size={18}/> تحويل الفاتورة لقسم التوصيل</>}
+            <button type="submit" disabled={isProcessing} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
+               {isProcessing ? 'جاري المعالجة...' : (sellForm.type === 'direct' ? <><Printer size={18}/> تأكيد الفاتورة والخصم</> : <><Truck size={18}/> تحويل الفاتورة لقسم التوصيل</>)}
             </button>
           </form>
         </Modal>
@@ -1228,6 +1292,7 @@ const DeliveryView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState('active');
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
 
   const activeDeliveries = orders.filter(o => o && ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status));
   const historyDeliveries = orders.filter(o => o?.status === 'completed');
@@ -1243,29 +1308,41 @@ const DeliveryView = () => {
   });
 
   const handleDispatch = async (order) => {
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
-    setSelectedOrder(null);
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
+        setSelectedOrder(null);
+    } finally {
+        setIsProcessing(false);
+    }
   };
 
   const handleDelivered = async (order) => {
-    const now = new Date().toISOString();
-    const updateData = { 
-       status: 'completed', 
-       completedAt: now,
-       receivedByUid: user.uid,
-       receivedByName: myProfile?.name || 'غير معروف' 
-    };
-    
-    if (order.paymentType === 'نقد' || !order.paymentType) {
-       updateData.cashStatus = 'with_driver'; 
-       showNotification("تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.");
-    } else {
-       updateData.cashStatus = 'credit_unpaid';
-       showNotification("تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.");
-    }
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        const now = new Date().toISOString();
+        const updateData = { 
+           status: 'completed', 
+           completedAt: now,
+           receivedByUid: user.uid,
+           receivedByName: myProfile?.name || 'غير معروف' 
+        };
+        
+        if (order.paymentType === 'نقد' || !order.paymentType) {
+           updateData.cashStatus = 'with_driver'; 
+           showNotification("تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.");
+        } else {
+           updateData.cashStatus = 'credit_unpaid';
+           showNotification("تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.");
+        }
 
-    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
-    setSelectedOrder(null);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
+        setSelectedOrder(null);
+    } finally {
+        setIsProcessing(false);
+    }
   };
 
   return (
@@ -1353,15 +1430,15 @@ const DeliveryView = () => {
                  {o.phone || '-'}
               </td>
               <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
-              <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{formatDate(o.completedAt)}</td>
-              <td className="p-4 text-xs text-gray-700 max-w-[200px] break-words leading-relaxed" title={o.address}>{o.address || '-'}</td>
+              <td className="p-4 text-sm text-gray-500">{formatDate(o.completedAt)}</td>
+              <td className="p-4 text-sm text-gray-600 truncate max-w-[150px]" title={o.address}>{o.address || '-'}</td>
               <td className="p-4"><button onClick={() => setPrintData({...o, printType: 'invoice'})} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors"><Printer size={16} /></button></td>
             </tr>
           ))}
         </Table>
       )}
 
-      <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} />
+      <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} isProcessing={isProcessing} />
     </div>
   );
 };
@@ -1454,12 +1531,12 @@ const SalesView = () => {
           return (
            <tr key={o.id} className="hover:bg-gray-50">
              <td className="p-4 font-mono text-xs text-gray-500 font-bold">#{formatOrderNum(o)}</td>
-             <td className="p-4 text-xs text-gray-500 whitespace-nowrap">{formatDate(o.completedAt || o.createdAt)}</td>
+             <td className="p-4 text-xs text-gray-500">{formatDate(o.completedAt || o.createdAt)}</td>
              <td className="p-4">
                 <p className="font-medium text-sm">{o.customerName || 'غير محدد'}</p>
                 {o.receivedByName && <span className="text-[10px] text-gray-500 bg-gray-100 px-1 rounded border">المستلم: {o.receivedByName}</span>}
              </td>
-             <td className="p-4 text-xs text-gray-600 max-w-[200px] break-words leading-relaxed" title={o.address}>{o.address || '-'}</td>
+             <td className="p-4 text-xs text-gray-600 truncate max-w-[150px]" title={o.address}>{o.address || '-'}</td>
              <td className="p-4 font-semibold text-green-700">{formatMoney(price)} IQD</td>
              <td className="p-4 font-semibold text-orange-700">{formatMoney(cogs)} IQD</td>
              <td className="p-4 font-bold text-blue-700">{formatMoney(profit)} IQD <span className="text-xs text-gray-500 font-normal">({margin}%)</span></td>
@@ -1471,14 +1548,431 @@ const SalesView = () => {
   );
 };
 
+const StoreView = () => {
+  const { inventory, inventoryLogs, recipes, finishedGoods, user, myProfile, showNotification, dynamicCategories, uploadToStorage } = useAppContext();
+  const [subTab, setSubTab] = useState('inventory'); // inventory, logs, recipes
+  const [isModalOpen, setModalOpen] = useState(false);
+  const [editingInvId, setEditingInvId] = useState(null);
+  const [deleteInvModal, setDeleteInvModal] = useState(null);
+  const [logToFinance, setLogToFinance] = useState(true); 
+  const [form, setForm] = useState({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
+  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  
+  const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
+  const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
+  const [recipeForm, setRecipeForm] = useState({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] });
+  const [selectedMat, setSelectedMat] = useState('');
+  const [selectedMatQty, setSelectedMatQty] = useState('');
+
+  const handleInventorySubmit = async (e) => {
+    e.preventDefault();
+    if(isProcessing) return;
+    setIsProcessing(true);
+    try {
+        const now = new Date().toISOString();
+        const newQty = Number(form.quantity);
+        const newPrice = Number(form.price) || 0;
+
+        if (editingInvId) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', editingInvId), {
+                itemName: form.itemName,
+                type: form.type,
+                unit: form.unit,
+                quantity: newQty,
+                price: newPrice,
+                lastUpdated: now
+            });
+            showNotification("تم تعديل بيانات المادة بنجاح.");
+            setEditingInvId(null);
+            setModalOpen(false);
+            setForm({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
+            return;
+        }
+
+        const existing = inventory.find(i => i.itemName === form.itemName && i.type === form.type);
+        let finalInvId = '';
+        
+        if (existing) {
+           const oldTotal = existing.quantity * existing.price;
+           const newTotal = newQty * newPrice;
+           const avgPrice = (oldTotal + newTotal) / (existing.quantity + newQty);
+           
+           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', existing.id), { 
+              quantity: existing.quantity + newQty, price: avgPrice, lastUpdated: now 
+           });
+           finalInvId = existing.id;
+           showNotification(`تم زيادة رصيد وتحديث متوسط التكلفة للمادة: ${form.itemName}`);
+        } else {
+           const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory'), { 
+              itemName: form.itemName, type: form.type, unit: form.unit, quantity: newQty, price: newPrice, lastUpdated: now 
+           });
+           finalInvId = docRef.id;
+           showNotification("تم إضافة المادة الجديدة للمستودع.");
+        }
+
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory_logs'), {
+           date: now, type: 'IN', inventoryId: finalInvId, itemName: form.itemName, qty: newQty, price: newPrice,
+           supplier: form.supplier || '-', invoiceNum: form.invoiceNum || '-', notes: 'إدخال مخزني جديد'
+        });
+
+        if (logToFinance && newPrice > 0) {
+           const totalCost = newQty * newPrice;
+           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+              category: 'inventory_purchase',
+              type: 'expense',
+              amount: totalCost,
+              description: `شراء مواد: ${newQty} ${form.unit} من ${form.itemName} ${form.supplier ? '(المورد: '+form.supplier+')' : ''}`,
+              date: now
+           });
+           showNotification("تم تسجيل عملية الشراء في السجل المالي تلقائياً.");
+        }
+
+        setModalOpen(false);
+        setForm({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
+    } finally {
+        setIsProcessing(false);
+    }
+  };
+
+  const handleEditInventory = (item) => {
+      setEditingInvId(item.id);
+      setForm({
+          itemName: item.itemName,
+          type: item.type || 'مكونات',
+          quantity: item.quantity,
+          unit: item.unit || 'كجم',
+          price: item.price || 0,
+          supplier: '',
+          invoiceNum: ''
+      });
+      setModalOpen(true);
+  };
+
+  const confirmDeleteInventory = async () => {
+      if(isProcessing) return;
+      setIsProcessing(true);
+      try {
+          if (deleteInvModal) {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', deleteInvModal));
+              showNotification("تم حذف المادة بنجاح.");
+              setDeleteInvModal(null);
+          }
+      } finally {
+          setIsProcessing(false);
+      }
+  };
+
+  const handleAdjustQty = async (id, currentQty, change, itemName) => {
+    const newQty = Number(currentQty) + change;
+    if (newQty < 0) return;
+    const now = new Date().toISOString();
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), { quantity: newQty, lastUpdated: now });
+    
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory_logs'), {
+       date: now, type: change > 0 ? 'IN_ADJUST' : 'OUT_ADJUST', inventoryId: id, itemName: itemName, qty: Math.abs(change), price: 0,
+       supplier: '-', invoiceNum: '-', notes: 'تعديل جرد يدوي'
+    });
+  };
+
+  const addMaterialToRecipe = () => {
+     if(!selectedMat || !selectedMatQty) return;
+     const invItem = inventory.find(i => i.id === selectedMat);
+     setRecipeForm({ ...recipeForm, materials: [...recipeForm.materials, { inventoryId: selectedMat, itemName: invItem.itemName, unit: invItem.unit, qty: Number(selectedMatQty) }] });
+     setSelectedMat(''); setSelectedMatQty('');
+  };
+
+  const saveRecipe = async (e) => {
+     e.preventDefault();
+     if(isProcessing) return;
+     setIsProcessing(true);
+     try {
+         let finalMaterials = [...recipeForm.materials];
+         
+         if (selectedMat && selectedMatQty) {
+             const invItem = inventory.find(i => i.id === selectedMat);
+             if(invItem) {
+                 finalMaterials.push({ inventoryId: selectedMat, itemName: invItem.itemName, unit: invItem.unit, qty: Number(selectedMatQty) });
+             }
+         }
+
+         if(finalMaterials.length === 0) {
+            showNotification("❌ لا يمكن حفظ معادلة فارغة! الرجاء إضافة مواد من خلال زر ( + ).");
+            return;
+         }
+
+         const finalCat = recipeForm.cakeCategory === 'NEW_CATEGORY' ? recipeForm.customCategory : recipeForm.cakeCategory;
+         const finalSize = recipeForm.cakeSize === 'NEW_SIZE' ? recipeForm.customSize : recipeForm.cakeSize;
+
+         if (!finalCat || !finalSize) {
+            showNotification("❌ يرجى تحديد اسم الفئة والحجم بشكل صحيح.");
+            return;
+         }
+
+         if (recipeForm.id) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recipes', recipeForm.id), { 
+                cakeCategory: finalCat,
+                cakeSize: finalSize,
+                materials: finalMaterials 
+            });
+         } else {
+            const existingId = recipes.find(r => r.cakeCategory === finalCat && r.cakeSize === finalSize)?.id;
+            if (existingId) {
+               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recipes', existingId), { materials: finalMaterials });
+            } else {
+               await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'recipes'), {
+                  cakeCategory: finalCat,
+                  cakeSize: finalSize,
+                  materials: finalMaterials
+               });
+            }
+         }
+         showNotification("تم حفظ المعادلة بنجاح. سيظهر الصنف تلقائياً في قائمة البيع.");
+         setRecipeModalOpen(false);
+         setSelectedMat(''); setSelectedMatQty('');
+     } finally {
+         setIsProcessing(false);
+     }
+  };
+
+  const confirmDeleteRecipe = async () => {
+     if(isProcessing) return;
+     setIsProcessing(true);
+     try {
+         if(deleteRecipeModal) {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recipes', deleteRecipeModal));
+            showNotification("تم حذف المعادلة بنجاح.");
+            setDeleteRecipeModal(null);
+         }
+     } finally {
+         setIsProcessing(false);
+     }
+  };
+
+  const handleEditRecipe = (r) => {
+     setRecipeForm({
+        id: r.id,
+        cakeCategory: r.cakeCategory,
+        customCategory: '',
+        cakeSize: r.cakeSize,
+        customSize: '',
+        materials: r.materials || []
+     });
+     setRecipeModalOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <h2 className="text-2xl font-bold text-gray-800">المستودع والإدارة الفنية</h2>
+        <div className="flex gap-2">
+           <button onClick={() => setSubTab('inventory')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${subTab === 'inventory' ? 'bg-amber-600 text-white' : 'bg-gray-200 text-gray-700'}`}>الأرصدة والتسعير</button>
+           <button onClick={() => setSubTab('logs')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${subTab === 'logs' ? 'bg-amber-600 text-white' : 'bg-gray-200 text-gray-700'}`}>مستندات الإدخال</button>
+           <button onClick={() => setSubTab('recipes')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${subTab === 'recipes' ? 'bg-amber-600 text-white' : 'bg-gray-200 text-gray-700'}`}>معادلات التصنيع (BOM)</button>
+        </div>
+      </div>
+
+      {subTab === 'inventory' && (
+         <>
+           <div className="flex justify-end"><button onClick={() => { setEditingInvId(null); setForm({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' }); setModalOpen(true); }} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> مستند إدخال جديد</button></div>
+           <Table headers={['اسم العنصر', 'الفئة', 'الرصيد الحالي', 'متوسط تكلفة الوحدة', 'إجمالي القيمة', 'إجراءات']}>
+             {inventory.map(item => (
+               <tr key={item.id} className="hover:bg-gray-50">
+                 <td className="p-4 font-semibold text-gray-800">{item.itemName}</td>
+                 <td className="p-4 text-sm text-gray-600">{item.type}</td>
+                 <td className="p-4"><span className={`px-3 py-1 rounded-full text-sm font-bold ${item.quantity < 10 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{item.quantity} {item.unit}</span></td>
+                 <td className="p-4 text-sm font-medium text-gray-700">{formatMoney(item.price)} IQD</td>
+                 <td className="p-4 font-bold text-amber-700 bg-amber-50/50">{formatMoney(item.quantity * item.price)} IQD</td>
+                 <td className="p-4 flex items-center gap-2">
+                   <div className="flex space-x-1 space-x-reverse bg-gray-100 rounded p-1">
+                     <button onClick={() => handleAdjustQty(item.id, item.quantity, 1, item.itemName)} className="bg-white hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-bold shadow-sm">+</button>
+                     <button onClick={() => handleAdjustQty(item.id, item.quantity, -1, item.itemName)} className="bg-white hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-bold shadow-sm">-</button>
+                   </div>
+                   {user && (
+                     <>
+                       <button onClick={() => handleEditInventory(item)} className="text-blue-600 hover:text-blue-800 p-1.5 bg-blue-50 rounded transition-colors" title="تعديل"><Edit size={16}/></button>
+                       <button onClick={() => setDeleteInvModal(item.id)} className="text-red-600 hover:text-red-800 p-1.5 bg-red-50 rounded transition-colors" title="حذف"><Trash2 size={16}/></button>
+                     </>
+                   )}
+                 </td>
+               </tr>
+             ))}
+             {inventory.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">المستودع فارغ حالياً.</td></tr>}
+           </Table>
+         </>
+      )}
+
+      {subTab === 'logs' && (
+         <Table headers={['التاريخ', 'الحركة', 'المادة', 'الكمية', 'الشركة المزودة / الملاحظات', 'رقم الفاتورة']}>
+            {inventoryLogs.map(log => (
+               <tr key={log.id} className="hover:bg-gray-50">
+                  <td className="p-4 text-sm text-gray-600">{formatDate(log.date)}</td>
+                  <td className="p-4"><span className={`px-2 py-0.5 rounded text-xs font-bold ${log.type.includes('IN') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{log.type.includes('IN') ? 'إدخال' : 'إخراج'}</span></td>
+                  <td className="p-4 font-bold text-sm text-gray-800">{log.itemName}</td>
+                  <td className="p-4 font-mono text-sm">{log.qty}</td>
+                  <td className="p-4 text-xs text-gray-600">{log.supplier !== '-' ? `المزود: ${log.supplier}` : log.notes}</td>
+                  <td className="p-4 text-xs font-mono text-gray-500">{log.invoiceNum}</td>
+               </tr>
+            ))}
+         </Table>
+      )}
+
+      {subTab === 'recipes' && (
+         <>
+           <div className="flex justify-between items-center mb-4">
+              <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-100">المعادلات تُستخدم لخصم المواد الأولية تلقائياً، وأي فئة تُضاف هنا ستظهر تلقائياً للبيع في شاشة إدارة الطلبات.</p>
+              <button onClick={() => { setRecipeForm({ id: '', cakeCategory: '', customCategory: '', cakeSize: '', customSize: '', materials: [] }); setRecipeModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm"><Plus size={20} /> ضبط معادلة كيك</button>
+           </div>
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {recipes.map(r => {
+                 let currentCost = 0;
+                 r.materials?.forEach(m => {
+                    const inv = inventory.find(i => i.id === m.inventoryId);
+                    if(inv) currentCost += (inv.price * m.qty);
+                 });
+                 return (
+                 <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 relative group">
+                    {user && (
+                       <div className="absolute top-2 left-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => handleEditRecipe(r)} className="bg-blue-50 text-blue-600 p-1.5 rounded hover:bg-blue-100" title="تعديل"><Edit size={16}/></button>
+                          <button onClick={() => setDeleteRecipeModal(r.id)} className="bg-red-50 text-red-600 p-1.5 rounded hover:bg-red-100" title="حذف"><Trash2 size={16}/></button>
+                       </div>
+                    )}
+                    <h4 className="font-bold text-gray-800 mb-1">{r.cakeCategory}</h4>
+                    <p className="text-sm text-amber-700 font-bold mb-3 border-b pb-2">الحجم: {r.cakeSize}</p>
+                    <ul className="text-xs text-gray-600 space-y-1 mb-3">
+                       {r.materials && r.materials.length > 0 ? r.materials.map((m, idx) => <li key={idx}>- {m.qty} {m.unit} من {m.itemName}</li>) : <li className="text-red-500 font-bold">لا توجد مواد مضافة! سيتم التجاهل.</li>}
+                    </ul>
+                    <div className="flex justify-between items-center bg-gray-50 p-2 rounded border">
+                       <span className="text-xs font-bold text-gray-700">التكلفة التقديرية الحالية (COGS):</span>
+                       <span className="font-bold text-red-600">{formatMoney(currentCost)} IQD</span>
+                    </div>
+                 </div>
+              )})}
+              {recipes.length === 0 && <p className="text-sm text-gray-400 p-4 col-span-full">لا توجد معادلات مضبوطة بعد.</p>}
+           </div>
+         </>
+      )}
+
+      <Modal isOpen={isModalOpen} onClose={() => { setModalOpen(false); setEditingInvId(null); }} title={editingInvId ? "تعديل بيانات المادة" : "مستند إدخال مخزني"}>
+        <form onSubmit={handleInventorySubmit} className="space-y-4">
+          {!editingInvId && (
+             <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-2">
+               <p className="text-xs text-blue-800 font-bold">ملاحظة: النظام يعتمد تسعير (المتوسط المرجح). في حال إضافة مادة موجودة مسبقاً بسعر مختلف، سيتم دمج الكميات وحساب متوسط التكلفة الجديد تلقائياً.</p>
+             </div>
+          )}
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">اسم المادة</label><input type="text" required value={form.itemName} onChange={e => setForm({...form, itemName: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+          <div className="grid grid-cols-2 gap-4">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">الفئة</label>
+               <select value={form.type} onChange={e => setForm({...form, type: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none"><option value="مكونات">مكونات ومواد خام</option><option value="تغليف">مواد تغليف وعلب</option><option value="معدات">معدات وأدوات</option></select>
+             </div>
+             <div><label className="block text-sm font-medium text-gray-700 mb-1">الوحدة</label><select value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none"><option value="كجم">كجم</option><option value="جرام">جرام</option><option value="قطعة">قطعة</option><option value="لتر">لتر</option></select></div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">{editingInvId ? "الكمية (تعديل مباشر)" : "الكمية المدخلة"}</label><input type="number" required min="0" step="0.01" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر الوحدة (IQD)</label><input type="number" step="1" min="0" required value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+          </div>
+          
+          {!editingInvId && (
+             <>
+               <div className="grid grid-cols-2 gap-4">
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">الشركة الموردة (اختياري)</label><input type="text" value={form.supplier} onChange={e => setForm({...form, supplier: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">رقم فاتورة الشراء (اختياري)</label><input type="text" value={form.invoiceNum} onChange={e => setForm({...form, invoiceNum: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none font-mono" /></div>
+               </div>
+               <div className="bg-gray-50 p-3 rounded-lg border flex items-center gap-3">
+                  <input type="checkbox" id="logToFinance" checked={logToFinance} onChange={e => setLogToFinance(e.target.checked)} className="w-5 h-5 text-amber-600 rounded focus:ring-amber-500 cursor-pointer" />
+                  <label htmlFor="logToFinance" className="text-sm font-bold text-gray-700 cursor-pointer">تسجيل القيمة الإجمالية كمصروف في سجل المالية تلقائياً</label>
+               </div>
+             </>
+          )}
+          <button type="submit" disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 shadow-md">{isProcessing ? 'جاري الحفظ...' : (editingInvId ? "حفظ التعديلات" : "تأكيد الإدخال وحفظ السعر")}</button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!deleteInvModal} onClose={() => setDeleteInvModal(null)} title="تأكيد الحذف">
+        <div className="space-y-4">
+          <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذه المادة نهائياً من المستودع؟</p>
+          <div className="flex gap-3">
+            <button onClick={confirmDeleteInventory} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الحذف...' : 'نعم، احذف'}</button>
+            <button onClick={() => setDeleteInvModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isRecipeModalOpen} onClose={() => setRecipeModalOpen(false)} title={recipeForm.id ? "تعديل معادلة التصنيع" : "ضبط معادلة تصنيع جديدة"}>
+        <form onSubmit={saveRecipe} className="space-y-4">
+           <div className="grid grid-cols-2 gap-4">
+              <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">فئة الكيك</label>
+                 <select required value={recipeForm.cakeCategory} onChange={e => setRecipeForm({...recipeForm, cakeCategory: e.target.value, cakeSize: dynamicCategories[e.target.value]?.[0]||''})} className="w-full p-2.5 border rounded-lg outline-none bg-white">
+                    <option value="">-- اختر الفئة --</option>
+                    <option value="NEW_CATEGORY" className="font-bold text-blue-600">➕ إضافة فئة كيك جديدة...</option>
+                    {Object.keys(dynamicCategories).filter(c=>c!=='أخرى (إدخال يدوي)').map(c => <option key={c} value={c}>{c}</option>)}
+                 </select>
+                 {recipeForm.cakeCategory === 'NEW_CATEGORY' && <input type="text" required placeholder="اكتب اسم الفئة الجديدة..." value={recipeForm.customCategory} onChange={e => setRecipeForm({...recipeForm, customCategory: e.target.value})} className="w-full mt-2 p-2 border border-blue-400 bg-blue-50 rounded-lg outline-none" />}
+              </div>
+              <div>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">الحجم المستهدف</label>
+                 <select required value={recipeForm.cakeSize} onChange={e => setRecipeForm({...recipeForm, cakeSize: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none bg-white">
+                    <option value="">-- اختر الحجم --</option>
+                    <option value="NEW_SIZE" className="font-bold text-blue-600">➕ إضافة حجم جديد...</option>
+                    {dynamicCategories[recipeForm.cakeCategory]?.map(s => <option key={s} value={s}>{s}</option>)}
+                 </select>
+                 {recipeForm.cakeSize === 'NEW_SIZE' && <input type="text" required placeholder="اكتب الحجم الجديد..." value={recipeForm.customSize} onChange={e => setRecipeForm({...recipeForm, customSize: e.target.value})} className="w-full mt-2 p-2 border border-blue-400 bg-blue-50 rounded-lg outline-none" />}
+              </div>
+           </div>
+
+           <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+              <p className="font-bold text-sm mb-2 text-gray-800">إضافة مواد للمعادلة:</p>
+              <div className="flex gap-2 mb-4">
+                 <select value={selectedMat} onChange={e => setSelectedMat(e.target.value)} className="flex-1 p-2 border rounded-lg outline-none text-sm bg-white">
+                    <option value="">-- اختر المادة من المستودع --</option>
+                    {inventory.map(i => <option key={i.id} value={i.id}>{i.itemName} ({i.unit})</option>)}
+                 </select>
+                 <input type="number" step="0.01" min="0" placeholder="الكمية" value={selectedMatQty} onChange={e => setSelectedMatQty(e.target.value)} className="w-24 p-2 border rounded-lg outline-none text-sm text-center" />
+                 <button type="button" onClick={addMaterialToRecipe} className="bg-blue-600 text-white px-3 rounded-lg hover:bg-blue-700"><Plus size={18}/></button>
+              </div>
+              
+              <div className="space-y-2">
+                 {recipeForm.materials.map((m, idx) => (
+                    <div key={idx} className="flex justify-between bg-white p-2 rounded border text-sm items-center">
+                       <span className="font-medium text-gray-800">{m.itemName}</span>
+                       <div className="flex items-center gap-3">
+                          <span className="font-bold text-blue-700">{m.qty} {m.unit}</span>
+                          <button type="button" onClick={() => setRecipeForm({...recipeForm, materials: recipeForm.materials.filter((_, i) => i !== idx)})} className="text-red-500 hover:bg-red-50 p-1 rounded"><X size={16}/></button>
+                       </div>
+                    </div>
+                 ))}
+                 {recipeForm.materials.length === 0 && <p className="text-xs text-red-500 text-center py-2 font-bold border border-red-200 border-dashed rounded bg-red-50">لم يتم إضافة أي مواد بعد!</p>}
+              </div>
+           </div>
+           <button type="submit" disabled={isProcessing} className="w-full bg-slate-800 disabled:bg-slate-400 text-white font-bold py-3 rounded-lg mt-4 shadow-md">{isProcessing ? 'جاري الحفظ...' : 'حفظ المعادلة'}</button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!deleteRecipeModal} onClose={() => setDeleteRecipeModal(null)} title="تأكيد حذف المعادلة">
+        <div className="space-y-4">
+          <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذه المعادلة نهائياً؟ (لن يتم خصم مواد الكيك المرتبط بها مستقبلاً)</p>
+          <div className="flex gap-3">
+            <button onClick={confirmDeleteRecipe} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الحذف...' : 'نعم، احذف المعادلة'}</button>
+            <button onClick={() => setDeleteRecipeModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+          </div>
+        </div>
+      </Modal>
+
+    </div>
+  );
+};
+
 const FinanceView = () => {
   const { orders, transactions, user, myProfile, showNotification, setPrintData } = useAppContext();
   const [isModalOpen, setModalOpen] = useState(false);
-  const [subTab, setSubTab] = useState('pl'); 
+  const [subTab, setSubTab] = useState('pl'); // pl, drivers, debts, logs
   const [filterCategory, setFilterCategory] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [form, setForm] = useState({ type: 'expense', category: 'operational', amount: '', description: '' });
+  const [processingId, setProcessingId] = useState(null); // قفل المعالجة للعمليات المالية
 
   const expenseCategories = { 'operational': 'المصروفات التشغيلية', 'admin': 'المصروفات الإدارية', 'marketing': 'المصروفات التسويقية', 'non_operational': 'مصروفات غير تشغيلية', 'allowances': 'المخصصات', 'inventory_purchase': 'مشتريات مخزون', 'other_expense': 'أخرى' };
   const incomeCategories = { 'revenue': 'إيرادات المبيعات', 'other_income': 'إيرادات أخرى' };
@@ -1503,8 +1997,8 @@ const FinanceView = () => {
   const plOrders = orders.filter(o => {
      if (!o || o.status !== 'completed') return false;
      try {
-       if (startDate && new Date(o.completedAt || o.createdAt || 0).getTime() < new Date(startDate).getTime()) return false;
-       if (endDate && new Date(o.completedAt || o.createdAt || 0).getTime() > new Date(endDate + 'T23:59:59').getTime()) return false;
+       if (startDate && new Date(o.completedAt || 0).getTime() < new Date(startDate).getTime()) return false;
+       if (endDate && new Date(o.completedAt || 0).getTime() > new Date(endDate + 'T23:59:59').getTime()) return false;
      } catch(e) {}
      return true;
   });
@@ -1519,40 +2013,56 @@ const FinanceView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...form, amount: Number(form.amount), date: new Date().toISOString() });
-    setModalOpen(false);
-    setForm({ type: 'expense', category: 'operational', amount: '', description: '' });
-    showNotification("تم حفظ المعاملة بنجاح.");
+    if(processingId === 'form') return;
+    setProcessingId('form');
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...form, amount: Number(form.amount), date: new Date().toISOString() });
+        setModalOpen(false);
+        setForm({ type: 'expense', category: 'operational', amount: '', description: '' });
+    } finally {
+        setProcessingId(null);
+    }
   };
 
   const confirmDriverCash = async (order) => {
-     const now = new Date().toISOString();
-     // فرض حالة "مكتمل" وإغلاق ثغرة عودة الطلب لإدارة الطلبات
-     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
-        status: 'completed',
-        cashStatus: 'received_by_finance',
-        receivedByUid: user.uid,
-        receivedByName: myProfile?.name || 'غير معروف'
-     });
-     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
-        category: 'revenue', type: 'income', amount: Number(order.price), description: `تحصيل نقدية مندوب لطلب: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
-     });
-     showNotification("تم استلام النقدية وتسجيلها في الإيرادات بنجاح.");
+     if(processingId === order.id) return;
+     setProcessingId(order.id);
+     try {
+         const now = new Date().toISOString();
+         // فرض التحديث للحالة النهائية لمنع الرجوع
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+            status: 'completed',
+            cashStatus: 'received_by_finance',
+            receivedByUid: user.uid,
+            receivedByName: myProfile?.name || 'غير معروف'
+         });
+         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+            category: 'revenue', type: 'income', amount: Number(order.price), description: `تحصيل نقدية مندوب لطلب: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
+         });
+         showNotification("تم استلام النقدية وتسجيلها في الإيرادات.");
+     } finally {
+         setProcessingId(null);
+     }
   };
 
   const confirmCreditPayment = async (order) => {
-     const now = new Date().toISOString();
-     // فرض حالة "مكتمل" وإغلاق ثغرة عودة الطلب لإدارة الطلبات
-     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
-        status: 'completed',
-        cashStatus: 'received_by_finance',
-        receivedByUid: user.uid,
-        receivedByName: myProfile?.name || 'غير معروف'
-     });
-     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
-        category: 'revenue', type: 'income', amount: Number(order.price), description: `سداد دين طلب آجل: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
-     });
-     showNotification("تم سداد الدين وتسجيله في الإيرادات بنجاح.");
+     if(processingId === order.id) return;
+     setProcessingId(order.id);
+     try {
+         const now = new Date().toISOString();
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+            status: 'completed',
+            cashStatus: 'received_by_finance',
+            receivedByUid: user.uid,
+            receivedByName: myProfile?.name || 'غير معروف'
+         });
+         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+            category: 'revenue', type: 'income', amount: Number(order.price), description: `سداد دين طلب آجل: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
+         });
+         showNotification("تم سداد الدين وتسجيله في الإيرادات.");
+     } finally {
+         setProcessingId(null);
+     }
   };
 
   return (
@@ -1619,7 +2129,7 @@ const FinanceView = () => {
                      <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                      <td className="p-4 text-sm text-gray-600">مندوب التوصيل</td>
                      <td className="p-4 font-bold text-red-600">{formatMoney(o.price)} IQD</td>
-                     <td className="p-4"><button onClick={() => confirmDriverCash(o)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1"><ArrowRightLeft size={14}/> استلام النقدية</button></td>
+                     <td className="p-4"><button onClick={() => confirmDriverCash(o)} disabled={processingId === o.id} className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{processingId === o.id ? 'جاري المعالجة...' : <><ArrowRightLeft size={14}/> استلام النقدية</>}</button></td>
                   </tr>
                ))}
                {driverCashOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبالغ معلقة عند السائقين.</td></tr>}
@@ -1638,7 +2148,7 @@ const FinanceView = () => {
                      <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                      <td className="p-4 font-mono text-xs dir-ltr text-right">{o.phone || '-'}</td>
                      <td className="p-4 font-bold text-orange-600">{formatMoney(o.price)} IQD</td>
-                     <td className="p-4"><button onClick={() => confirmCreditPayment(o)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1"><CheckCircle size={14}/> تسديد الدين</button></td>
+                     <td className="p-4"><button onClick={() => confirmCreditPayment(o)} disabled={processingId === o.id} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{processingId === o.id ? 'جاري المعالجة...' : <><CheckCircle size={14}/> تسديد الدين</>}</button></td>
                   </tr>
                ))}
                {creditOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد ديون مسجلة.</td></tr>}
@@ -1687,18 +2197,136 @@ const FinanceView = () => {
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">البيان (الوصف)</label><input type="text" required value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (IQD)</label><input type="number" required min="0" step="1" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none font-bold text-lg" /></div>
-          <button type="submit" className="w-full bg-amber-600 text-white font-bold py-3 rounded-lg mt-4 shadow">حفظ المعاملة في السجل</button>
+          <button type="submit" disabled={processingId === 'form'} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 shadow">{processingId === 'form' ? 'جاري التسجيل...' : 'حفظ المعاملة في السجل'}</button>
         </form>
       </Modal>
     </div>
   );
 };
 
+const AdminView = () => {
+  const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+  const [permModal, setPermModal] = useState(null);
+  const [newEmp, setNewEmp] = useState({ name: '', username: '', password: '', role: 'staff' });
+
+  const handleRoleChange = async (profileId, newRole) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', profileId), { role: newRole });
+  };
+
+  const handleSavePermissions = async () => {
+     if(!permModal) return;
+     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', permModal.id), { customPermissions: permModal.perms });
+     setPermModal(null);
+     showNotification("تم تحديث صلاحيات الموظف بنجاح.");
+  };
+
+  const togglePerm = (tabId) => {
+     setPermModal(prev => {
+        const newPerms = prev.perms.includes(tabId) ? prev.perms.filter(t => t !== tabId) : [...prev.perms, tabId];
+        return { ...prev, perms: newPerms };
+     });
+  };
+
+  const handleDeleteEmployee = async (profileId) => {
+     if(window.confirm("هل أنت متأكد من حذف هذا الموظف نهائياً؟")) {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', profileId));
+        showNotification("تم حذف الموظف بنجاح.");
+     }
+  };
+
+  const handleCreateEmployee = async (e) => {
+    e.preventDefault();
+    const systemEmail = getSystemEmail(newEmp.username);
+    try {
+      const appName = "SecondaryAppForCreation";
+      const secondaryApp = getApps().find(app => app.name === appName) || initializeApp(firebaseConfig, appName);
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      await setPersistence(secondaryAuth, inMemoryPersistence);
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, systemEmail, newEmp.password);
+      const newUid = userCredential.user.uid;
+      await signOut(secondaryAuth);
+      
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', newUid), {
+        uid: newUid, name: newEmp.name, username: newEmp.username.trim().toLowerCase().replace(/\s+/g, ''),
+        role: newEmp.role, customPermissions: [], createdAt: new Date().toISOString()
+      });
+      
+      setCreateModalOpen(false);
+      setNewEmp({ name: '', username: '', password: '', role: 'staff' });
+      showNotification("✅ تم إنشاء حساب الموظف بنجاح.");
+    } catch (err) { 
+      let msg = err.message;
+      if(err.code === 'auth/email-already-in-use') msg = 'اسم المستخدم (اليوزر) محجوز مسبقاً، اختر اسماً آخر.';
+      if(err.code === 'auth/weak-password') msg = 'كلمة المرور ضعيفة، يجب أن تكون 6 أحرف أو أرقام على الأقل.';
+      showNotification("❌ خطأ: " + msg); 
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div><h2 className="text-2xl font-bold text-gray-800">إدارة النظام والموظفين</h2></div>
+        <button onClick={() => setCreateModalOpen(true)} className="bg-slate-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm w-full md:w-auto justify-center">
+          <ShieldCheck size={20} /> إضافة موظف
+        </button>
+      </div>
+      <Table headers={['الاسم', 'اسم المستخدم', 'الرتبة', 'تاريخ الانضمام', 'إدارة الحساب']}>
+        {profiles.map(p => (
+           <tr key={p.id} className="hover:bg-gray-50">
+             <td className="p-4 font-semibold text-gray-800">{p.name} {p.uid === user.uid && <span className="text-xs bg-amber-100 text-amber-800 px-2 rounded ml-2">أنت</span>}</td>
+             <td className="p-4 text-sm text-gray-600 font-mono bg-gray-100 rounded px-2">{p.username}</td>
+             <td className="p-4">
+                <select value={p.role} onChange={(e) => handleRoleChange(p.id, e.target.value)} disabled={p.uid === user.uid} className="p-2 border rounded-lg text-sm bg-white">
+                  <option value="admin">المدير العام</option><option value="manager">مدير المصنع</option><option value="operations">العمليات</option><option value="sales">المبيعات</option><option value="production">الإنتاج</option><option value="store">المستودع</option><option value="delivery">التوصيل</option><option value="finance">المالية</option><option value="staff">بدون صلاحية</option>
+                </select>
+             </td>
+             <td className="p-4 text-sm text-gray-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
+             <td className="p-4 flex gap-2">
+                <button onClick={() => setPermModal({ id: p.id, name: p.name, perms: p.customPermissions || [] })} disabled={p.role === 'admin'} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Lock size={14}/> الصلاحيات</button>
+                <button onClick={() => handleDeleteEmployee(p.id)} disabled={p.uid === user.uid} className="text-xs bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"><Trash2 size={14}/> حذف</button>
+             </td>
+           </tr>
+        ))}
+      </Table>
+
+      <Modal isOpen={!!permModal} onClose={() => setPermModal(null)} title={`تعديل صلاحيات الوصول: ${permModal?.name}`}>
+         <div className="space-y-4">
+            <p className="text-sm text-gray-600 mb-2">ضع علامة صح أمام الأقسام التي يُسمح لهذا الموظف برؤيتها والوصول إليها:</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
+               {TABS.map(tab => (
+                  <label key={tab.id} className="flex items-center gap-3 p-2 bg-white rounded border cursor-pointer hover:bg-blue-50 transition-colors">
+                     <input type="checkbox" checked={permModal?.perms.includes(tab.id)} onChange={() => togglePerm(tab.id)} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer" />
+                     <span className="text-sm font-bold text-gray-800">{tab.label}</span>
+                  </label>
+               ))}
+            </div>
+            <button onClick={handleSavePermissions} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">حفظ الصلاحيات الجديدة</button>
+         </div>
+      </Modal>
+
+      <Modal isOpen={isCreateModalOpen} onClose={() => setCreateModalOpen(false)} title="إنشاء حساب موظف">
+        <form onSubmit={handleCreateEmployee} className="space-y-4">
+          <input type="text" required placeholder="الاسم الكامل" value={newEmp.name} onChange={e => setNewEmp({...newEmp, name: e.target.value})} className="w-full p-2.5 border rounded-lg" />
+          <input type="text" required placeholder="اسم المستخدم (للدخول)" value={newEmp.username} onChange={e => setNewEmp({...newEmp, username: e.target.value})} className="w-full p-2.5 border rounded-lg dir-ltr text-right" />
+          <input type="password" required minLength="6" placeholder="كلمة المرور" value={newEmp.password} onChange={e => setNewEmp({...newEmp, password: e.target.value})} className="w-full p-2.5 border rounded-lg dir-ltr text-right" />
+          <select value={newEmp.role} onChange={e => setNewEmp({...newEmp, role: e.target.value})} className="w-full p-2.5 border rounded-lg">
+            <option value="staff">بدون صلاحية</option><option value="manager">مدير مصنع</option><option value="operations">العمليات</option><option value="sales">مبيعات</option><option value="production">إنتاج</option><option value="store">مستودع</option><option value="delivery">توصيل</option><option value="finance">مالية</option>
+          </select>
+          <button type="submit" className="w-full bg-slate-800 text-white font-bold py-3 rounded-lg">إنشاء الحساب</button>
+        </form>
+      </Modal>
+    </div>
+  );
+};
+
+// --- واجهات التحميل والدخول الخاصة بـ App ---
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [profilesLoaded, setProfilesLoaded] = useState(false); 
-  const [showSkipLoading, setShowSkipLoading] = useState(false); // زر التخطي
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
+  const [showSkipLoading, setShowSkipLoading] = useState(false); // زر التخطي عند تأخر الصور
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [zoomedImage, setZoomedImage] = useState(null);
@@ -1731,7 +2359,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // مؤقت التخطي الذكي (يظهر بعد 3 ثوانٍ من الانتظار)
+  // مؤقت التخطي الذكي للتحميل الطويل
   useEffect(() => {
      let t;
      if (user && !profilesLoaded) {
@@ -1853,6 +2481,22 @@ export default function App() {
      }, 500); 
   };
 
+  // دالة الرفع إلى Firebase Storage
+  const uploadToStorage = async (file) => {
+    try {
+      const base64DataUrl = await compressImage(file);
+      const fileName = `images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+      const storageRef = ref(storage, fileName);
+      await uploadString(storageRef, base64DataUrl, 'data_url');
+      const downloadURL = await getDownloadURL(storageRef);
+      return downloadURL;
+    } catch (error) {
+      console.error("Storage Error:", error);
+      showNotification("❌ فشل الرفع. تأكد من تفعيل وتصريح Storage في الفايربيس الخاص بك!");
+      return null;
+    }
+  };
+
   const TABS = [
     { id: 'Dashboard', icon: LayoutDashboard, label: 'النظرة العامة' },
     { id: 'Orders', icon: ShoppingCart, label: 'إدارة الطلبات' },
@@ -1937,7 +2581,7 @@ export default function App() {
       <AppContext.Provider value={{ 
           orders, inventory, inventoryLogs, recipes, finishedGoods, transactions, profiles, 
           user, myProfile, isManagerOrAdmin, dynamicCategories, 
-          setActiveTab, showNotification, setPrintData, setZoomedImage 
+          setActiveTab, showNotification, setPrintData, setZoomedImage, uploadToStorage
       }}>
       <style dangerouslySetInnerHTML={{__html: `
         @media print { 
