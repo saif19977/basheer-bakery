@@ -1605,7 +1605,7 @@ const StoreView = () => {
         } else {
            const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory'), { 
               itemName: form.itemName, type: form.type, unit: form.unit, quantity: newQty, price: newPrice, lastUpdated: now 
-           });
+         });
            finalInvId = docRef.id;
            showNotification("تم إضافة المادة الجديدة للمستودع.");
         }
@@ -2065,6 +2065,13 @@ const FinanceView = () => {
      }
   };
 
+  const handleDeleteTransaction = async (id) => {
+    if (window.confirm('هل أنت متأكد من حذف هذه المعاملة المالية نهائياً؟ (استخدم هذا لتنظيف التكرار القديم)')) {
+       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
+       showNotification("تم حذف المعاملة بنجاح وتحديث الحسابات.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -2166,7 +2173,7 @@ const FinanceView = () => {
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm" />
               </div>
             </div>
-            <Table headers={['التاريخ', 'النوع', 'الفئة', 'الوصف', 'المبلغ']}>
+            <Table headers={['التاريخ', 'النوع', 'الفئة', 'الوصف', 'المبلغ', 'إجراء']}>
               {fullyFilteredTransactions.map(t => (
                 <tr key={t.id} className="hover:bg-gray-50">
                   <td className="p-4 text-sm whitespace-nowrap">{formatDate(t.date)}</td>
@@ -2174,9 +2181,16 @@ const FinanceView = () => {
                   <td className="p-4 text-sm font-bold">{allCategories[t.category] || t.category}</td>
                   <td className="p-4 text-gray-800 max-w-xs truncate">{t.description}</td>
                   <td className={`p-4 font-bold dir-ltr text-right ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'income' ? '+' : '-'} {formatMoney(t.amount)} IQD</td>
+                  <td className="p-4 text-center">
+                    {myProfile?.role === 'admin' && (
+                       <button onClick={() => handleDeleteTransaction(t.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors border border-transparent hover:border-red-200" title="حذف القيد لتنظيف التكرار">
+                         <Trash2 size={16}/>
+                       </button>
+                    )}
+                  </td>
                 </tr>
               ))}
-              {fullyFilteredTransactions.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-gray-400">لا توجد معاملات.</td></tr>}
+              {fullyFilteredTransactions.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد معاملات.</td></tr>}
             </Table>
          </div>
       )}
