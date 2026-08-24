@@ -54,7 +54,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app); // تفعيل مخزن الصور السحابي
+const storage = getStorage(app); 
 const appId = 'cakeshop-production';
 
 // --- دوال الحماية والمساعدة ---
@@ -91,7 +91,7 @@ const formatOrderNum = (order) => {
 
 const getSystemEmail = (userStr) => `${String(userStr || '').trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
 
-// ضغط الصور السريع قبل رفعها للستورج
+// ضغط الصور السريع
 const compressImage = (file, maxWidth = 800) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -263,7 +263,7 @@ const OrdersView = () => {
   const [filter, setFilter] = useState('active');
   const [editingId, setEditingId] = useState(null);
   const [cancelModal, setCancelModal] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  const [isProcessing, setIsProcessing] = useState(false); 
   
   const uniqueCustomers = useMemo(() => {
     const custMap = {};
@@ -1367,6 +1367,11 @@ const DeliveryView = () => {
                       <span className="font-mono text-xs text-yellow-600 font-bold mb-1">#{formatOrderNum(o)}</span>
                       <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
                       <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+                      
+                      <div className="bg-white p-1.5 rounded border border-gray-100 text-[10px] font-bold text-gray-700 mt-2 text-center flex items-center justify-center gap-1">
+                        <Clock size={12} className="text-blue-500" /> موعد التسليم: {formatDate(o.deliveryDate)}
+                      </div>
+
                       <div className="mt-auto pt-2 flex justify-between items-center">
                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
                          <Countdown deliveryDate={o.deliveryDate} />
@@ -1386,6 +1391,11 @@ const DeliveryView = () => {
                     <span className="font-mono text-xs text-blue-500 font-bold mb-1">#{formatOrderNum(o)}</span>
                     <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
                     <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+
+                    <div className="bg-white p-1.5 rounded border border-gray-100 text-[10px] font-bold text-gray-700 mt-2 text-center flex items-center justify-center gap-1">
+                      <Clock size={12} className="text-blue-500" /> موعد التسليم: {formatDate(o.deliveryDate)}
+                    </div>
+
                     <div className="mt-auto pt-2 flex justify-between items-center">
                        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
                        <Countdown deliveryDate={o.deliveryDate} />
@@ -1404,6 +1414,11 @@ const DeliveryView = () => {
                      <span className="font-mono text-xs text-purple-500 font-bold mb-1">#{formatOrderNum(o)}</span>
                      <h4 className="font-bold text-gray-800 line-clamp-1">{o.customerName || 'غير محدد'}</h4>
                      <p className="text-xs text-gray-600 my-1 font-medium line-clamp-1">{o.address || 'بدون عنوان'}</p>
+
+                     <div className="bg-white p-1.5 rounded border border-gray-100 text-[10px] font-bold text-gray-700 mt-2 text-center flex items-center justify-center gap-1">
+                        <Clock size={12} className="text-blue-500" /> موعد التسليم: {formatDate(o.deliveryDate)}
+                     </div>
+
                      <div className="mt-auto pt-2 flex justify-between items-center">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span>
                         <Countdown deliveryDate={o.deliveryDate} />
@@ -2382,6 +2397,23 @@ export default function App() {
      return () => clearTimeout(t);
   }, [user, profilesLoaded]);
 
+  // دالة الرفع إلى Firebase Storage مع نظام الطوارئ
+  const uploadToStorage = async (file) => {
+    try {
+      const base64DataUrl = await compressImage(file);
+      const fileName = `images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+      const storageRef = ref(storage, fileName);
+      await uploadString(storageRef, base64DataUrl, 'data_url');
+      const downloadURL = await getDownloadURL(storageRef);
+      return downloadURL;
+    } catch (error) {
+      console.error("Storage Error:", error);
+      showNotification("⚠️ لم يتم تفعيل Storage بشكل صحيح، تم حفظ الصورة محلياً مؤقتاً لضمان عدم توقف العمل.");
+      // نظام الطوارئ: يضغط الصورة جداً لتخفيف العبء على النظام
+      return await compressImage(file, 500); 
+    }
+  };
+
   useEffect(() => {
     if (!user) {
        setProfilesLoaded(false);
@@ -2493,22 +2525,6 @@ export default function App() {
         window.print();
         setIsPrinting(false);
      }, 500); 
-  };
-
-  // دالة الرفع إلى Firebase Storage
-  const uploadToStorage = async (file) => {
-    try {
-      const base64DataUrl = await compressImage(file);
-      const fileName = `images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-      const storageRef = ref(storage, fileName);
-      await uploadString(storageRef, base64DataUrl, 'data_url');
-      const downloadURL = await getDownloadURL(storageRef);
-      return downloadURL;
-    } catch (error) {
-      console.error("Storage Error:", error);
-      showNotification("❌ فشل الرفع. تأكد من تفعيل وتصريح Storage في الفايربيس الخاص بك!");
-      return null;
-    }
   };
 
   const TABS = [
