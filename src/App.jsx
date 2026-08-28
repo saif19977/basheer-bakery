@@ -310,20 +310,29 @@ const OrdersView = () => {
      }
   };
 
-  const handleItemImageUpload = async (index, files) => {
+  const handleItemImageUpload = async (index, e) => {
+    const files = e.target.files;
     if(!files || files.length === 0) return;
+    
+    // تجميد الصور في الذاكرة لمنع مسحها عند إعادة الريندر
+    const filesArray = Array.from(files);
+    e.target.value = ''; // تصفير الحقل ليقبل نفس الصورة مستقبلاً
+    
     showNotification("⏳ جاري رفع الصور...");
+    setIsProcessing(true); // قفل المعالجة
+    
     const newItems = [...form.items];
     const currentImages = newItems[index].itemImages || [];
     const uploadedImages = [];
     
-    for(let i=0; i<files.length; i++) {
-       const url = await uploadToStorage(files[i]);
+    for(let i=0; i<filesArray.length; i++) {
+       const url = await uploadToStorage(filesArray[i]);
        if(url) uploadedImages.push(url);
     }
     
     newItems[index].itemImages = [...currentImages, ...uploadedImages];
     setForm({ ...form, items: newItems });
+    setIsProcessing(false); // فتح القفل
     if(uploadedImages.length > 0) showNotification("✅ تم رفع الصور بنجاح!");
   };
 
@@ -614,7 +623,7 @@ const OrdersView = () => {
                             <div className="w-16 h-16 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center relative hover:bg-gray-100 transition-colors cursor-pointer">
                                <Plus size={20} className="text-gray-400 mb-1"/>
                                <span className="text-[9px] font-bold text-gray-500 text-center">إضافة</span>
-                               <input type="file" multiple accept="image/*" onChange={e => handleItemImageUpload(index, e.target.files)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                               <input type="file" multiple accept="image/*" disabled={isProcessing} onChange={e => handleItemImageUpload(index, e)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
                             </div>
                          </div>
                       </div>
@@ -911,6 +920,7 @@ const ProductionView = () => {
   const handleCompleteUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
+      e.target.value = ''; // تصفير الحقل 
       showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
       const url = await uploadToStorage(file);
       if(url) {
@@ -1059,12 +1069,15 @@ const FinishedGoodsView = () => {
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
+      e.target.value = ''; // تصفير الحقل
+      setIsProcessing(true);
       showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
       const url = await uploadToStorage(file);
       if(url) {
           setForm(prev => ({ ...prev, image: url }));
           showNotification("✅ تم رفع الصورة بنجاح!");
       }
+      setIsProcessing(false);
     }
   };
 
@@ -1242,7 +1255,7 @@ const FinishedGoodsView = () => {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المضافة</label><input type="number" required min="1" step="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر البيع للقطعة (IQD)</label><input type="number" required min="0" step="1" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50" />{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" disabled={isProcessing} onChange={e => { handleUpload(e); e.target.value = ''; }} className="w-full p-2 border rounded-lg bg-gray-50 disabled:cursor-not-allowed" />{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
           <button type="submit" disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors">{isProcessing ? 'جاري الإضافة...' : 'تأكيد الإضافة'}</button>
         </form>
       </Modal>
