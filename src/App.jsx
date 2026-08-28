@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { 
   Cake, LayoutDashboard, ShoppingCart, ChefHat, 
   Store as StoreIcon, Truck, DollarSign, Users, 
   Plus, X, CheckCircle, TrendingUp, Package, Clock, AlertCircle,
-  Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck,
-  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent, Lock, Loader2
+  Search, Printer, Edit, Image as ImageIcon, LogOut, ShieldCheck,
+  Menu, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, ZoomIn, Receipt, ArrowRightLeft, Lock, Loader2
 } from 'lucide-react';
 
 // --- صائد الأخطاء لمنع الشاشة البيضاء ---
@@ -106,8 +106,10 @@ const compressImage = (file, maxWidth = 800) => {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
+      img.onerror = () => resolve(null);
       img.src = event.target.result;
     };
+    reader.onerror = () => resolve(null);
     reader.readAsDataURL(file);
   });
 };
@@ -264,6 +266,7 @@ const OrdersView = () => {
   const [editingId, setEditingId] = useState(null);
   const [cancelModal, setCancelModal] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false); 
+  const [isUploadingImg, setIsUploadingImg] = useState(false); 
   
   const uniqueCustomers = useMemo(() => {
     const custMap = {};
@@ -314,12 +317,11 @@ const OrdersView = () => {
     const files = e.target.files;
     if(!files || files.length === 0) return;
     
-    // تجميد الصور في الذاكرة لمنع مسحها عند إعادة الريندر
     const filesArray = Array.from(files);
-    e.target.value = ''; // تصفير الحقل ليقبل نفس الصورة مستقبلاً
+    e.target.value = ''; 
     
+    setIsUploadingImg(true); 
     showNotification("⏳ جاري رفع الصور...");
-    setIsProcessing(true); // قفل المعالجة
     
     const newItems = [...form.items];
     const currentImages = newItems[index].itemImages || [];
@@ -332,7 +334,7 @@ const OrdersView = () => {
     
     newItems[index].itemImages = [...currentImages, ...uploadedImages];
     setForm({ ...form, items: newItems });
-    setIsProcessing(false); // فتح القفل
+    setIsUploadingImg(false); 
     if(uploadedImages.length > 0) showNotification("✅ تم رفع الصور بنجاح!");
   };
 
@@ -411,7 +413,7 @@ const OrdersView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if(isProcessing) return;
+    if(isProcessing || isUploadingImg) return; 
     setIsProcessing(true);
     try {
         let finalForm = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes, deliveryFee: Number(form.deliveryFee || 0) };
@@ -621,9 +623,9 @@ const OrdersView = () => {
                                </div>
                             ))}
                             <div className="w-16 h-16 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center relative hover:bg-gray-100 transition-colors cursor-pointer">
-                               <Plus size={20} className="text-gray-400 mb-1"/>
-                               <span className="text-[9px] font-bold text-gray-500 text-center">إضافة</span>
-                               <input type="file" multiple accept="image/*" disabled={isProcessing} onChange={e => handleItemImageUpload(index, e)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+                               {isUploadingImg ? <Loader2 size={20} className="animate-spin text-amber-600 mb-1" /> : <Plus size={20} className="text-gray-400 mb-1"/>}
+                               <span className="text-[9px] font-bold text-gray-500 text-center">{isUploadingImg ? 'جاري...' : 'إضافة'}</span>
+                               <input type="file" multiple accept="image/*" disabled={isUploadingImg || isProcessing} onChange={e => handleItemImageUpload(index, e)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
                             </div>
                          </div>
                       </div>
@@ -645,7 +647,7 @@ const OrdersView = () => {
             <textarea value={form.globalNotes} onChange={e => setForm({...form, globalNotes: e.target.value})} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" rows="2" placeholder="مثال: يرجى الاتصال قبل الوصول بنصف ساعة..."></textarea>
           </div>
           
-          <button type="submit" disabled={isProcessing} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold py-4 rounded-xl mt-6 transition-colors text-lg shadow-lg flex items-center justify-center gap-2">
+          <button type="submit" disabled={isProcessing || isUploadingImg} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold py-4 rounded-xl mt-6 transition-colors text-lg shadow-lg flex items-center justify-center gap-2">
             {isProcessing ? <><Loader2 className="animate-spin" size={24} /> جاري المعالجة...</> : (editingId ? "حفظ التعديلات" : "تأكيد واعتماد الطلب")}
           </button>
         </form>
@@ -819,6 +821,7 @@ const ProductionView = () => {
   const [orderType, setOrderType] = useState(''); 
   const [completionModal, setCompletionModal] = useState({ isOpen: false, order: null, finalImage: '' });
   const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  const [isUploadingImg, setIsUploadingImg] = useState(false);
 
   // فلترة الطلبات حسب التاريخ (فولدرات يومية)
   const groupOrdersByDate = (ordersList) => {
@@ -921,17 +924,19 @@ const ProductionView = () => {
     const file = e.target.files[0];
     if (file) {
       e.target.value = ''; // تصفير الحقل 
+      setIsUploadingImg(true); // قفل الصور
       showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
       const url = await uploadToStorage(file);
       if(url) {
           setCompletionModal(prev => ({ ...prev, finalImage: url }));
           showNotification("✅ تم رفع الصورة بنجاح!");
       }
+      setIsUploadingImg(false);
     }
   };
 
   const confirmCompletion = async () => {
-    if(isProcessing) return;
+    if(isProcessing || isUploadingImg) return;
     setIsProcessing(true);
     try {
         const order = completionModal.order;
@@ -1039,10 +1044,11 @@ const ProductionView = () => {
           <p className="text-gray-700">هل أنت متأكد من الانتهاء من تجهيز الطلب <span className="font-mono font-bold bg-gray-100 px-1">#{completionModal.order && formatOrderNum(completionModal.order)}</span>؟</p>
           <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 text-center">
             <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center justify-center gap-2"><Camera size={18} /> إرفاق صورة للمنتج بعد الإكمال (اختياري)</label>
-            <input type="file" accept="image/*" onChange={handleCompleteUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
+            <input type="file" accept="image/*" disabled={isUploadingImg || isProcessing} onChange={handleCompleteUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer disabled:opacity-50" />
+            {isUploadingImg && <p className="text-xs text-amber-600 mt-2 font-bold">جاري رفع الصورة...</p>}
             {completionModal.finalImage && <img src={completionModal.finalImage} alt="final product" className="mt-4 w-full max-h-48 object-contain rounded-lg border shadow-sm mx-auto" />}
           </div>
-          <button onClick={confirmCompletion} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><CheckCircle size={18}/> تأكيد الإنجاز النهائي</>}</button>
+          <button onClick={confirmCompletion} disabled={isProcessing || isUploadingImg} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><CheckCircle size={18}/> تأكيد الإنجاز النهائي</>}</button>
         </div>
       </Modal>
     </div>
@@ -1058,6 +1064,7 @@ const FinishedGoodsView = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  const [isUploadingImg, setIsUploadingImg] = useState(false);
   
   const [form, setForm] = useState({ code: '', name: '', quantity: 1, price: '', image: '' });
   const [sellQty, setSellQty] = useState(1);
@@ -1070,20 +1077,20 @@ const FinishedGoodsView = () => {
     const file = e.target.files[0];
     if (file) {
       e.target.value = ''; // تصفير الحقل
-      setIsProcessing(true);
+      setIsUploadingImg(true);
       showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
       const url = await uploadToStorage(file);
       if(url) {
           setForm(prev => ({ ...prev, image: url }));
           showNotification("✅ تم رفع الصورة بنجاح!");
       }
-      setIsProcessing(false);
+      setIsUploadingImg(false);
     }
   };
 
   const handleAddItem = async (e) => {
     e.preventDefault();
-    if(isProcessing) return;
+    if(isProcessing || isUploadingImg) return;
     setIsProcessing(true);
     try {
         const existingItem = finishedGoods.find(item => String(item.name).trim() === String(form.name).trim() && item.code === form.code);
@@ -1255,8 +1262,8 @@ const FinishedGoodsView = () => {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المضافة</label><input type="number" required min="1" step="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر البيع للقطعة (IQD)</label><input type="number" required min="0" step="1" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" disabled={isProcessing} onChange={e => { handleUpload(e); e.target.value = ''; }} className="w-full p-2 border rounded-lg bg-gray-50 disabled:cursor-not-allowed" />{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
-          <button type="submit" disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors">{isProcessing ? 'جاري الإضافة...' : 'تأكيد الإضافة'}</button>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" disabled={isUploadingImg || isProcessing} onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50 disabled:cursor-not-allowed" />{isUploadingImg && <span className="text-xs text-amber-600 font-bold ml-2">جاري رفع الصورة...</span>}{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
+          <button type="submit" disabled={isProcessing || isUploadingImg} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors">{isProcessing ? 'جاري الإضافة...' : 'تأكيد الإضافة'}</button>
         </form>
       </Modal>
 
@@ -2410,20 +2417,35 @@ export default function App() {
      return () => clearTimeout(t);
   }, [user, profilesLoaded]);
 
-  // دالة الرفع إلى Firebase Storage مع نظام الطوارئ
+  // دالة الرفع إلى Firebase Storage مع مؤقت ذكي (Timeout) يمنع التعليق
   const uploadToStorage = async (file) => {
     try {
-      const base64DataUrl = await compressImage(file);
-      const fileName = `images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-      const storageRef = ref(storage, fileName);
-      await uploadString(storageRef, base64DataUrl, 'data_url');
-      const downloadURL = await getDownloadURL(storageRef);
-      return downloadURL;
+      const base64DataUrl = await compressImage(file, 800);
+      if (!base64DataUrl) return null;
+
+      // محاولة الرفع السحابي مع حد زمني أقصاه 4 ثوانٍ
+      const uploadPromise = new Promise(async (resolve, reject) => {
+        try {
+          const fileName = `images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+          const storageRef = ref(storage, fileName);
+          await uploadString(storageRef, base64DataUrl, 'data_url');
+          const downloadURL = await getDownloadURL(storageRef);
+          resolve(downloadURL);
+        } catch (e) {
+          reject(e);
+        }
+      });
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout")), 4000)
+      );
+
+      // السباق بين الرفع والمؤقت (أيهما يكتمل أولاً)
+      return await Promise.race([uploadPromise, timeoutPromise]);
     } catch (error) {
-      console.error("Storage Error:", error);
-      showNotification("⚠️ لم يتم تفعيل Storage بشكل صحيح، تم حفظ الصورة محلياً مؤقتاً لضمان عدم توقف العمل.");
-      // نظام الطوارئ: يضغط الصورة جداً لتخفيف العبء على النظام
-      return await compressImage(file, 500); 
+      console.error("Storage Error or Timeout:", error);
+      // نظام الطوارئ: يضغط الصورة جداً ويحفظها كـ Base64 لضمان عدم توقف العمل
+      return await compressImage(file, 400); 
     }
   };
 
