@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { 
   Cake, LayoutDashboard, ShoppingCart, ChefHat, 
   Store as StoreIcon, Truck, DollarSign, Users, 
   Plus, X, CheckCircle, TrendingUp, Package, Clock, AlertCircle,
-  Search, Printer, Edit, Image as ImageIcon, LogOut, ShieldCheck,
-  Menu, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, ZoomIn, Receipt, ArrowRightLeft, Lock, Loader2
+  Search, Printer, Download, Edit, Image as ImageIcon, FileText, LogOut, ShieldCheck,
+  Menu, Bell, Camera, Box, Tag, Trash2, CalendarClock, Play, Phone, UploadCloud, ZoomIn, Receipt, ArrowRightLeft, Percent, Lock, Loader2
 } from 'lucide-react';
 
 // --- صائد الأخطاء لمنع الشاشة البيضاء ---
@@ -265,8 +265,10 @@ const OrdersView = () => {
   const [filter, setFilter] = useState('active');
   const [editingId, setEditingId] = useState(null);
   const [cancelModal, setCancelModal] = useState(null);
+  
   const [isProcessing, setIsProcessing] = useState(false); 
   const [isUploadingImg, setIsUploadingImg] = useState(false); 
+  const submitLock = useRef(false); // قفل إضافي لحماية التكرار
   
   const uniqueCustomers = useMemo(() => {
     const custMap = {};
@@ -356,9 +358,10 @@ const OrdersView = () => {
   };
 
   const confirmCancelOrder = async () => {
-      if(isProcessing) return;
+      if(submitLock.current || isProcessing) return;
       const order = cancelModal;
       if(!order) return;
+      submitLock.current = true;
       setIsProcessing(true);
       try {
           const items = getOrderItems(order);
@@ -372,7 +375,7 @@ const OrdersView = () => {
           showNotification('تم إلغاء الطلب واسترجاع الكميات للمخزن التام.');
           setCancelModal(null);
       } finally {
-          setIsProcessing(false);
+          setTimeout(() => { submitLock.current = false; setIsProcessing(false); }, 1500);
       }
   };
 
@@ -413,7 +416,8 @@ const OrdersView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if(isProcessing || isUploadingImg) return; 
+    if(submitLock.current || isProcessing || isUploadingImg) return; 
+    submitLock.current = true;
     setIsProcessing(true);
     try {
         let finalForm = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes, deliveryFee: Number(form.deliveryFee || 0) };
@@ -424,6 +428,7 @@ const OrdersView = () => {
                  const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
                  if (!fgItem || Number(fgItem.quantity || 0) < Number(item.quantity || 1)) {
                     showNotification(`❌ الكمية المطلوبة من الصنف "${item.cakeCategory}" غير متوفرة في المخزن التام!`);
+                    submitLock.current = false;
                     setIsProcessing(false);
                     return;
                  }
@@ -450,7 +455,7 @@ const OrdersView = () => {
         setEditingId(null);
         setForm({ customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد', deliveryDate: '', globalNotes: '', deliveryFee: '', items: [{ ...initialItemState }], totalPrice: 0 });
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => { submitLock.current = false; setIsProcessing(false); }, 1500);
     }
   };
 
@@ -820,8 +825,11 @@ const ProductionView = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderType, setOrderType] = useState(''); 
   const [completionModal, setCompletionModal] = useState({ isOpen: false, order: null, finalImage: '' });
-  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
-  const [isUploadingImg, setIsUploadingImg] = useState(false);
+  
+  const isProcessing = useRef(false); // تعديل ليصبح Ref
+  const [uiProcessing, setUiProcessing] = useState(false); // للحالة الظاهرية فقط
+
+  const actionLock = useRef(new Set()); // قفل مخصص لمنع تكرار نفس الطلب نهائياً
 
   // فلترة الطلبات حسب التاريخ (فولدرات يومية)
   const groupOrdersByDate = (ordersList) => {
@@ -841,8 +849,10 @@ const ProductionView = () => {
   const groupedBaking = groupOrdersByDate(bakingOrders);
 
   const handleStartBaking = async (order) => {
-     if(isProcessing) return;
-     setIsProcessing(true);
+     if(actionLock.current.has(order.id) || isProcessing.current) return;
+     actionLock.current.add(order.id);
+     isProcessing.current = true;
+     setUiProcessing(true);
      try {
          if (order.materialsDeducted) {
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'baking', updatedAt: new Date().toISOString() });
@@ -911,7 +921,7 @@ const ProductionView = () => {
              showNotification("✅ تم نقل الطلب إلى مرحلة جاري التحضير.");
          }
      } finally {
-         setIsProcessing(false);
+         setTimeout(() => { isProcessing.current = false; setUiProcessing(false); }, 1500);
      }
   };
 
@@ -920,11 +930,12 @@ const ProductionView = () => {
      setCompletionModal({ isOpen: true, order: order, finalImage: '' }); 
   };
 
+  const [isUploadingImg, setIsUploadingImg] = useState(false);
   const handleCompleteUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      e.target.value = ''; // تصفير الحقل 
-      setIsUploadingImg(true); // قفل الصور
+      e.target.value = ''; 
+      setIsUploadingImg(true); 
       showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
       const url = await uploadToStorage(file);
       if(url) {
@@ -936,8 +947,10 @@ const ProductionView = () => {
   };
 
   const confirmCompletion = async () => {
-    if(isProcessing || isUploadingImg) return;
-    setIsProcessing(true);
+    if(actionLock.current.has(completionModal.order?.id) || isProcessing.current || isUploadingImg) return;
+    actionLock.current.add(completionModal.order.id);
+    isProcessing.current = true;
+    setUiProcessing(true);
     try {
         const order = completionModal.order;
         const updateData = { status: 'ready', updatedAt: new Date().toISOString() };
@@ -947,7 +960,7 @@ const ProductionView = () => {
         setCompletionModal({ isOpen: false, order: null, finalImage: '' });
         showNotification("✅ تم إنجاز الطلب وهو جاهز الآن للتوصيل!");
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => { isProcessing.current = false; setUiProcessing(false); }, 1500);
     }
   };
 
@@ -1036,7 +1049,7 @@ const ProductionView = () => {
          isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={orderType}
          onPrimaryAction={orderType === 'production_pending' ? handleStartBaking : triggerCompletion}
          onSecondaryAction={handlePrintProduction}
-         isProcessing={isProcessing}
+         isProcessing={uiProcessing}
       />
 
       <Modal isOpen={completionModal.isOpen} onClose={() => setCompletionModal({ isOpen: false, order: null, finalImage: '' })} title="تأكيد تجهيز الطلب">
@@ -1044,11 +1057,11 @@ const ProductionView = () => {
           <p className="text-gray-700">هل أنت متأكد من الانتهاء من تجهيز الطلب <span className="font-mono font-bold bg-gray-100 px-1">#{completionModal.order && formatOrderNum(completionModal.order)}</span>؟</p>
           <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 text-center">
             <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center justify-center gap-2"><Camera size={18} /> إرفاق صورة للمنتج بعد الإكمال (اختياري)</label>
-            <input type="file" accept="image/*" disabled={isUploadingImg || isProcessing} onChange={handleCompleteUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer disabled:opacity-50" />
+            <input type="file" accept="image/*" disabled={isUploadingImg || uiProcessing} onChange={handleCompleteUpload} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer disabled:opacity-50" />
             {isUploadingImg && <p className="text-xs text-amber-600 mt-2 font-bold">جاري رفع الصورة...</p>}
             {completionModal.finalImage && <img src={completionModal.finalImage} alt="final product" className="mt-4 w-full max-h-48 object-contain rounded-lg border shadow-sm mx-auto" />}
           </div>
-          <button onClick={confirmCompletion} disabled={isProcessing || isUploadingImg} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">{isProcessing ? 'جاري المعالجة...' : <><CheckCircle size={18}/> تأكيد الإنجاز النهائي</>}</button>
+          <button onClick={confirmCompletion} disabled={uiProcessing || isUploadingImg} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors shadow flex justify-center items-center gap-2">{uiProcessing ? 'جاري المعالجة...' : <><CheckCircle size={18}/> تأكيد الإنجاز النهائي</>}</button>
         </div>
       </Modal>
     </div>
@@ -1063,7 +1076,9 @@ const FinishedGoodsView = () => {
   const [deleteFGModal, setDeleteFGModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  
+  const submitLock = useRef(false);
+  const [uiProcessing, setUiProcessing] = useState(false);
   const [isUploadingImg, setIsUploadingImg] = useState(false);
   
   const [form, setForm] = useState({ code: '', name: '', quantity: 1, price: '', image: '' });
@@ -1076,7 +1091,7 @@ const FinishedGoodsView = () => {
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      e.target.value = ''; // تصفير الحقل
+      e.target.value = ''; 
       setIsUploadingImg(true);
       showNotification("⏳ جاري رفع صورة المنتج للسيرفر...");
       const url = await uploadToStorage(file);
@@ -1090,8 +1105,9 @@ const FinishedGoodsView = () => {
 
   const handleAddItem = async (e) => {
     e.preventDefault();
-    if(isProcessing || isUploadingImg) return;
-    setIsProcessing(true);
+    if(submitLock.current || isUploadingImg) return;
+    submitLock.current = true;
+    setUiProcessing(true);
     try {
         const existingItem = finishedGoods.find(item => String(item.name).trim() === String(form.name).trim() && item.code === form.code);
         if (existingItem) {
@@ -1108,14 +1124,15 @@ const FinishedGoodsView = () => {
         setAddModalOpen(false);
         setForm({ code: '', name: '', quantity: 1, price: '', image: '' });
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
     }
   };
 
   const confirmAddStock = async (e) => {
      e.preventDefault();
-     if(isProcessing) return;
-     setIsProcessing(true);
+     if(submitLock.current) return;
+     submitLock.current = true;
+     setUiProcessing(true);
      try {
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', addStockModal.id), {
             quantity: Number(addStockModal.quantity || 0) + addQty,
@@ -1125,28 +1142,30 @@ const FinishedGoodsView = () => {
          setAddStockModal(null);
          setAddQty(1);
      } finally {
-         setIsProcessing(false);
+         setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
      }
   };
 
   const confirmDeleteFG = async () => {
-    if(isProcessing) return;
-    setIsProcessing(true);
+    if(submitLock.current) return;
+    submitLock.current = true;
+    setUiProcessing(true);
     try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'finished_goods', deleteFGModal));
         showNotification("تم حذف المنتج بنجاح.");
         setDeleteFGModal(null);
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
     }
   };
 
   const handleSell = async (e) => {
     e.preventDefault();
-    if(isProcessing) return;
+    if(submitLock.current) return;
     if (sellQty > Number(selectedItem.quantity || 0)) { showNotification("❌ الكمية المطلوبة أكبر من المتوفر!"); return; }
     
-    setIsProcessing(true);
+    submitLock.current = true;
+    setUiProcessing(true);
     try {
         const newQty = Number(selectedItem.quantity || 0) - sellQty;
         const totalRevenue = sellQty * Number(selectedItem.price || 0);
@@ -1194,7 +1213,7 @@ const FinishedGoodsView = () => {
         setSellQty(1);
         setSellForm({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
     }
   };
 
@@ -1234,8 +1253,8 @@ const FinishedGoodsView = () => {
         <div className="space-y-4">
           <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذا المنتج نهائياً من المخزن التام؟</p>
           <div className="flex gap-3">
-            <button onClick={confirmDeleteFG} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الحذف...' : 'نعم، احذف المنتج'}</button>
-            <button onClick={() => setDeleteFGModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            <button onClick={confirmDeleteFG} disabled={uiProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{uiProcessing ? 'جاري الحذف...' : 'نعم، احذف المنتج'}</button>
+            <button onClick={() => setDeleteFGModal(null)} disabled={uiProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
           </div>
         </div>
       </Modal>
@@ -1250,7 +1269,7 @@ const FinishedGoodsView = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">الكمية الجديدة المراد إضافتها للرصيد</label>
               <input type="number" required min="1" step="1" value={addQty} onChange={e => setAddQty(Number(e.target.value))} className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold" />
            </div>
-           <button type="submit" disabled={isProcessing} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-2 transition-colors flex justify-center items-center gap-2">{isProcessing ? 'جاري التحديث...' : <><Plus size={18}/> تحديث الرصيد</>}</button>
+           <button type="submit" disabled={uiProcessing} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-2 transition-colors flex justify-center items-center gap-2">{uiProcessing ? 'جاري التحديث...' : <><Plus size={18}/> تحديث الرصيد</>}</button>
         </form>
       </Modal>
 
@@ -1262,8 +1281,8 @@ const FinishedGoodsView = () => {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">الكمية المضافة</label><input type="number" required min="1" step="1" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">سعر البيع للقطعة (IQD)</label><input type="number" required min="0" step="1" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" disabled={isUploadingImg || isProcessing} onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50 disabled:cursor-not-allowed" />{isUploadingImg && <span className="text-xs text-amber-600 font-bold ml-2">جاري رفع الصورة...</span>}{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
-          <button type="submit" disabled={isProcessing || isUploadingImg} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors">{isProcessing ? 'جاري الإضافة...' : 'تأكيد الإضافة'}</button>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">صورة المنتج</label><input type="file" accept="image/*" disabled={isUploadingImg || uiProcessing} onChange={handleUpload} className="w-full p-2 border rounded-lg bg-gray-50 disabled:cursor-not-allowed" />{isUploadingImg && <span className="text-xs text-amber-600 font-bold ml-2">جاري رفع الصورة...</span>}{form.image && <img src={form.image} alt="preview" className="mt-2 h-20 object-contain rounded border" />}</div>
+          <button type="submit" disabled={uiProcessing || isUploadingImg} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors">{uiProcessing ? 'جاري الإضافة...' : 'تأكيد الإضافة'}</button>
         </form>
       </Modal>
 
@@ -1297,8 +1316,8 @@ const FinishedGoodsView = () => {
               <p className="text-2xl font-bold">{formatMoney(sellQty * Number(selectedItem.price || 0))} IQD</p>
             </div>
 
-            <button type="submit" disabled={isProcessing} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
-               {isProcessing ? 'جاري المعالجة...' : (sellForm.type === 'direct' ? <><Printer size={18}/> تأكيد الفاتورة والخصم</> : <><Truck size={18}/> تحويل الفاتورة لقسم التوصيل</>)}
+            <button type="submit" disabled={uiProcessing} className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
+               {uiProcessing ? 'جاري المعالجة...' : (sellForm.type === 'direct' ? <><Printer size={18}/> تأكيد الفاتورة والخصم</> : <><Truck size={18}/> تحويل الفاتورة لقسم التوصيل</>)}
             </button>
           </form>
         </Modal>
@@ -1312,7 +1331,9 @@ const DeliveryView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState('active');
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  
+  const actionLock = useRef(new Set());
+  const [uiProcessing, setUiProcessing] = useState(false);
 
   const activeDeliveries = orders.filter(o => o && ['pending', 'baking', 'ready', 'out_for_delivery'].includes(o.status));
   const historyDeliveries = orders.filter(o => o?.status === 'completed');
@@ -1328,19 +1349,21 @@ const DeliveryView = () => {
   });
 
   const handleDispatch = async (order) => {
-    if(isProcessing) return;
-    setIsProcessing(true);
+    if(actionLock.current.has(order.id)) return;
+    actionLock.current.add(order.id);
+    setUiProcessing(true);
     try {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
         setSelectedOrder(null);
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => setUiProcessing(false), 1500);
     }
   };
 
   const handleDelivered = async (order) => {
-    if(isProcessing) return;
-    setIsProcessing(true);
+    if(actionLock.current.has(order.id)) return;
+    actionLock.current.add(order.id);
+    setUiProcessing(true);
     try {
         const now = new Date().toISOString();
         const updateData = { 
@@ -1361,7 +1384,7 @@ const DeliveryView = () => {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
         setSelectedOrder(null);
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => setUiProcessing(false), 1500);
     }
   };
 
@@ -1473,7 +1496,7 @@ const DeliveryView = () => {
         </Table>
       )}
 
-      <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} isProcessing={isProcessing} />
+      <OrderDetailsModal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} order={selectedOrder} type={selectedOrder?.status === 'ready' ? 'delivery_dispatch' : selectedOrder?.status === 'out_for_delivery' ? 'delivery_complete' : 'delivery_view_only'} onPrimaryAction={selectedOrder?.status === 'ready' ? handleDispatch : handleDelivered} onSecondaryAction={(o) => setPrintData({...o, printType: 'invoice'})} isProcessing={uiProcessing} />
     </div>
   );
 };
@@ -1591,7 +1614,9 @@ const StoreView = () => {
   const [deleteInvModal, setDeleteInvModal] = useState(null);
   const [logToFinance, setLogToFinance] = useState(true); 
   const [form, setForm] = useState({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
-  const [isProcessing, setIsProcessing] = useState(false); // قفل المعالجة
+  
+  const submitLock = useRef(false);
+  const [uiProcessing, setUiProcessing] = useState(false);
   
   const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
   const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
@@ -1601,8 +1626,9 @@ const StoreView = () => {
 
   const handleInventorySubmit = async (e) => {
     e.preventDefault();
-    if(isProcessing) return;
-    setIsProcessing(true);
+    if(submitLock.current) return;
+    submitLock.current = true;
+    setUiProcessing(true);
     try {
         const now = new Date().toISOString();
         const newQty = Number(form.quantity);
@@ -1665,7 +1691,7 @@ const StoreView = () => {
         setModalOpen(false);
         setForm({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
     } finally {
-        setIsProcessing(false);
+        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
     }
   };
 
@@ -1684,8 +1710,9 @@ const StoreView = () => {
   };
 
   const confirmDeleteInventory = async () => {
-      if(isProcessing) return;
-      setIsProcessing(true);
+      if(submitLock.current) return;
+      submitLock.current = true;
+      setUiProcessing(true);
       try {
           if (deleteInvModal) {
               await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', deleteInvModal));
@@ -1693,7 +1720,7 @@ const StoreView = () => {
               setDeleteInvModal(null);
           }
       } finally {
-          setIsProcessing(false);
+          setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
       }
   };
 
@@ -1718,8 +1745,9 @@ const StoreView = () => {
 
   const saveRecipe = async (e) => {
      e.preventDefault();
-     if(isProcessing) return;
-     setIsProcessing(true);
+     if(submitLock.current) return;
+     submitLock.current = true;
+     setUiProcessing(true);
      try {
          let finalMaterials = [...recipeForm.materials];
          
@@ -1732,6 +1760,7 @@ const StoreView = () => {
 
          if(finalMaterials.length === 0) {
             showNotification("❌ لا يمكن حفظ معادلة فارغة! الرجاء إضافة مواد من خلال زر ( + ).");
+            submitLock.current = false; setUiProcessing(false);
             return;
          }
 
@@ -1740,6 +1769,7 @@ const StoreView = () => {
 
          if (!finalCat || !finalSize) {
             showNotification("❌ يرجى تحديد اسم الفئة والحجم بشكل صحيح.");
+            submitLock.current = false; setUiProcessing(false);
             return;
          }
 
@@ -1765,13 +1795,14 @@ const StoreView = () => {
          setRecipeModalOpen(false);
          setSelectedMat(''); setSelectedMatQty('');
      } finally {
-         setIsProcessing(false);
+         setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
      }
   };
 
   const confirmDeleteRecipe = async () => {
-     if(isProcessing) return;
-     setIsProcessing(true);
+     if(submitLock.current) return;
+     submitLock.current = true;
+     setUiProcessing(true);
      try {
          if(deleteRecipeModal) {
             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recipes', deleteRecipeModal));
@@ -1779,7 +1810,7 @@ const StoreView = () => {
             setDeleteRecipeModal(null);
          }
      } finally {
-         setIsProcessing(false);
+         setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
      }
   };
 
@@ -1920,7 +1951,7 @@ const StoreView = () => {
                </div>
              </>
           )}
-          <button type="submit" disabled={isProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 shadow-md">{isProcessing ? 'جاري الحفظ...' : (editingInvId ? "حفظ التعديلات" : "تأكيد الإدخال وحفظ السعر")}</button>
+          <button type="submit" disabled={uiProcessing} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 shadow-md">{uiProcessing ? 'جاري الحفظ...' : (editingInvId ? "حفظ التعديلات" : "تأكيد الإدخال وحفظ السعر")}</button>
         </form>
       </Modal>
 
@@ -1928,8 +1959,8 @@ const StoreView = () => {
         <div className="space-y-4">
           <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذه المادة نهائياً من المستودع؟</p>
           <div className="flex gap-3">
-            <button onClick={confirmDeleteInventory} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الحذف...' : 'نعم، احذف'}</button>
-            <button onClick={() => setDeleteInvModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            <button onClick={confirmDeleteInventory} disabled={uiProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{uiProcessing ? 'جاري الحذف...' : 'نعم، احذف'}</button>
+            <button onClick={() => setDeleteInvModal(null)} disabled={uiProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
           </div>
         </div>
       </Modal>
@@ -1981,7 +2012,7 @@ const StoreView = () => {
                  {recipeForm.materials.length === 0 && <p className="text-xs text-red-500 text-center py-2 font-bold border border-red-200 border-dashed rounded bg-red-50">لم يتم إضافة أي مواد بعد!</p>}
               </div>
            </div>
-           <button type="submit" disabled={isProcessing} className="w-full bg-slate-800 disabled:bg-slate-400 text-white font-bold py-3 rounded-lg mt-4 shadow-md">{isProcessing ? 'جاري الحفظ...' : 'حفظ المعادلة'}</button>
+           <button type="submit" disabled={uiProcessing} className="w-full bg-slate-800 disabled:bg-slate-400 text-white font-bold py-3 rounded-lg mt-4 shadow-md">{uiProcessing ? 'جاري الحفظ...' : 'حفظ المعادلة'}</button>
         </form>
       </Modal>
 
@@ -1989,8 +2020,8 @@ const StoreView = () => {
         <div className="space-y-4">
           <p className="text-gray-700 font-medium">هل أنت متأكد من حذف هذه المعادلة نهائياً؟ (لن يتم خصم مواد الكيك المرتبط بها مستقبلاً)</p>
           <div className="flex gap-3">
-            <button onClick={confirmDeleteRecipe} disabled={isProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{isProcessing ? 'جاري الحذف...' : 'نعم، احذف المعادلة'}</button>
-            <button onClick={() => setDeleteRecipeModal(null)} disabled={isProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
+            <button onClick={confirmDeleteRecipe} disabled={uiProcessing} className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg transition-colors">{uiProcessing ? 'جاري الحذف...' : 'نعم، احذف المعادلة'}</button>
+            <button onClick={() => setDeleteRecipeModal(null)} disabled={uiProcessing} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-lg transition-colors">تراجع</button>
           </div>
         </div>
       </Modal>
@@ -2007,7 +2038,10 @@ const FinanceView = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [form, setForm] = useState({ type: 'expense', category: 'operational', amount: '', description: '' });
-  const [processingId, setProcessingId] = useState(null); // قفل المعالجة للعمليات المالية
+  
+  const actionLock = useRef(new Set()); // قفل مخصص لمنع تكرار سداد النقدية
+  const submitLock = useRef(false);
+  const [uiProcessingId, setUiProcessingId] = useState(null); // للواجهة فقط
 
   const expenseCategories = { 'operational': 'المصروفات التشغيلية', 'admin': 'المصروفات الإدارية', 'marketing': 'المصروفات التسويقية', 'non_operational': 'مصروفات غير تشغيلية', 'allowances': 'المخصصات', 'inventory_purchase': 'مشتريات مخزون', 'other_expense': 'أخرى' };
   const incomeCategories = { 'revenue': 'إيرادات المبيعات', 'other_income': 'إيرادات أخرى' };
@@ -2048,23 +2082,24 @@ const FinanceView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if(processingId === 'form') return;
-    setProcessingId('form');
+    if(submitLock.current) return;
+    submitLock.current = true;
+    setUiProcessingId('form');
     try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...form, amount: Number(form.amount), date: new Date().toISOString() });
         setModalOpen(false);
         setForm({ type: 'expense', category: 'operational', amount: '', description: '' });
     } finally {
-        setProcessingId(null);
+        setTimeout(() => { submitLock.current = false; setUiProcessingId(null); }, 1500);
     }
   };
 
   const confirmDriverCash = async (order) => {
-     if(processingId === order.id) return;
-     setProcessingId(order.id);
+     if(actionLock.current.has(order.id)) return;
+     actionLock.current.add(order.id);
+     setUiProcessingId(order.id);
      try {
          const now = new Date().toISOString();
-         // فرض التحديث للحالة النهائية لمنع الرجوع
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
             status: 'completed',
             cashStatus: 'received_by_finance',
@@ -2075,14 +2110,17 @@ const FinanceView = () => {
             category: 'revenue', type: 'income', amount: Number(order.price), description: `تحصيل نقدية مندوب لطلب: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
          });
          showNotification("تم استلام النقدية وتسجيلها في الإيرادات.");
+     } catch (e) {
+         actionLock.current.delete(order.id); // فتح القفل فقط في حال فشل السيرفر
      } finally {
-         setProcessingId(null);
+         setTimeout(() => { setUiProcessingId(null); }, 1500);
      }
   };
 
   const confirmCreditPayment = async (order) => {
-     if(processingId === order.id) return;
-     setProcessingId(order.id);
+     if(actionLock.current.has(order.id)) return;
+     actionLock.current.add(order.id);
+     setUiProcessingId(order.id);
      try {
          const now = new Date().toISOString();
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
@@ -2095,8 +2133,10 @@ const FinanceView = () => {
             category: 'revenue', type: 'income', amount: Number(order.price), description: `سداد دين طلب آجل: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
          });
          showNotification("تم سداد الدين وتسجيله في الإيرادات.");
+     } catch (e) {
+         actionLock.current.delete(order.id);
      } finally {
-         setProcessingId(null);
+         setTimeout(() => { setUiProcessingId(null); }, 1500);
      }
   };
 
@@ -2171,7 +2211,7 @@ const FinanceView = () => {
                      <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                      <td className="p-4 text-sm text-gray-600">مندوب التوصيل</td>
                      <td className="p-4 font-bold text-red-600">{formatMoney(o.price)} IQD</td>
-                     <td className="p-4"><button onClick={() => confirmDriverCash(o)} disabled={processingId === o.id} className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{processingId === o.id ? 'جاري المعالجة...' : <><ArrowRightLeft size={14}/> استلام النقدية</>}</button></td>
+                     <td className="p-4"><button onClick={() => confirmDriverCash(o)} disabled={uiProcessingId === o.id || actionLock.current.has(o.id)} className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{uiProcessingId === o.id ? 'جاري المعالجة...' : <><ArrowRightLeft size={14}/> استلام النقدية</>}</button></td>
                   </tr>
                ))}
                {driverCashOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبالغ معلقة عند السائقين.</td></tr>}
@@ -2190,7 +2230,7 @@ const FinanceView = () => {
                      <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                      <td className="p-4 font-mono text-xs dir-ltr text-right">{o.phone || '-'}</td>
                      <td className="p-4 font-bold text-orange-600">{formatMoney(o.price)} IQD</td>
-                     <td className="p-4"><button onClick={() => confirmCreditPayment(o)} disabled={processingId === o.id} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{processingId === o.id ? 'جاري المعالجة...' : <><CheckCircle size={14}/> تسديد الدين</>}</button></td>
+                     <td className="p-4"><button onClick={() => confirmCreditPayment(o)} disabled={uiProcessingId === o.id || actionLock.current.has(o.id)} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{uiProcessingId === o.id ? 'جاري المعالجة...' : <><CheckCircle size={14}/> تسديد الدين</>}</button></td>
                   </tr>
                ))}
                {creditOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد ديون مسجلة.</td></tr>}
@@ -2246,7 +2286,7 @@ const FinanceView = () => {
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">البيان (الوصف)</label><input type="text" required value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none" /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (IQD)</label><input type="number" required min="0" step="1" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} className="w-full p-2.5 border rounded-lg outline-none font-bold text-lg" /></div>
-          <button type="submit" disabled={processingId === 'form'} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 shadow">{processingId === 'form' ? 'جاري التسجيل...' : 'حفظ المعاملة في السجل'}</button>
+          <button type="submit" disabled={uiProcessingId === 'form'} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white font-bold py-3 rounded-lg mt-4 shadow">{uiProcessingId === 'form' ? 'جاري التسجيل...' : 'حفظ المعاملة في السجل'}</button>
         </form>
       </Modal>
     </div>
@@ -2375,7 +2415,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
-  const [showSkipLoading, setShowSkipLoading] = useState(false); // زر التخطي عند تأخر الصور
+  const [showSkipLoading, setShowSkipLoading] = useState(false); 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [zoomedImage, setZoomedImage] = useState(null);
@@ -2408,7 +2448,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // مؤقت التخطي الذكي للتحميل الطويل
   useEffect(() => {
      let t;
      if (user && !profilesLoaded) {
@@ -2417,13 +2456,11 @@ export default function App() {
      return () => clearTimeout(t);
   }, [user, profilesLoaded]);
 
-  // دالة الرفع إلى Firebase Storage مع مؤقت ذكي (Timeout) يمنع التعليق
   const uploadToStorage = async (file) => {
     try {
       const base64DataUrl = await compressImage(file, 800);
       if (!base64DataUrl) return null;
 
-      // محاولة الرفع السحابي مع حد زمني أقصاه 4 ثوانٍ
       const uploadPromise = new Promise(async (resolve, reject) => {
         try {
           const fileName = `images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
@@ -2440,11 +2477,9 @@ export default function App() {
         setTimeout(() => reject(new Error("Timeout")), 4000)
       );
 
-      // السباق بين الرفع والمؤقت (أيهما يكتمل أولاً)
       return await Promise.race([uploadPromise, timeoutPromise]);
     } catch (error) {
       console.error("Storage Error or Timeout:", error);
-      // نظام الطوارئ: يضغط الصورة جداً ويحفظها كـ Base64 لضمان عدم توقف العمل
       return await compressImage(file, 400); 
     }
   };
@@ -2620,7 +2655,6 @@ export default function App() {
     );
   }
 
-  // حاجز صد الطرد المباشر
   if (user && !myProfile) {
      return (
        <div className="flex h-screen w-full items-center justify-center bg-gray-50 p-4 font-sans" dir="rtl">
