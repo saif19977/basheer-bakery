@@ -91,7 +91,6 @@ const formatOrderNum = (order) => {
 
 const getSystemEmail = (userStr) => `${String(userStr || '').trim().toLowerCase().replace(/\s+/g, '')}@basheer.system`;
 
-// ضغط الصور السريع
 const compressImage = (file, maxWidth = 800) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -124,7 +123,6 @@ const getOrderItems = (order) => {
   }];
 };
 
-// --- إنشاء Context ---
 const AppContext = createContext(null);
 const useAppContext = () => useContext(AppContext);
 
@@ -268,7 +266,6 @@ const OrdersView = () => {
   
   const [isProcessing, setIsProcessing] = useState(false); 
   const [isUploadingImg, setIsUploadingImg] = useState(false); 
-  const submitLock = useRef(false); // قفل إضافي لحماية التكرار
   
   const uniqueCustomers = useMemo(() => {
     const custMap = {};
@@ -358,10 +355,9 @@ const OrdersView = () => {
   };
 
   const confirmCancelOrder = async () => {
-      if(submitLock.current || isProcessing) return;
+      if(isProcessing) return;
       const order = cancelModal;
       if(!order) return;
-      submitLock.current = true;
       setIsProcessing(true);
       try {
           const items = getOrderItems(order);
@@ -375,7 +371,7 @@ const OrdersView = () => {
           showNotification('تم إلغاء الطلب واسترجاع الكميات للمخزن التام.');
           setCancelModal(null);
       } finally {
-          setTimeout(() => { submitLock.current = false; setIsProcessing(false); }, 1500);
+          setIsProcessing(false);
       }
   };
 
@@ -416,8 +412,7 @@ const OrdersView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if(submitLock.current || isProcessing || isUploadingImg) return; 
-    submitLock.current = true;
+    if(isProcessing || isUploadingImg) return; 
     setIsProcessing(true);
     try {
         let finalForm = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes, deliveryFee: Number(form.deliveryFee || 0) };
@@ -428,7 +423,6 @@ const OrdersView = () => {
                  const fgItem = finishedGoods.find(g => g.id === item.selectedFG);
                  if (!fgItem || Number(fgItem.quantity || 0) < Number(item.quantity || 1)) {
                     showNotification(`❌ الكمية المطلوبة من الصنف "${item.cakeCategory}" غير متوفرة في المخزن التام!`);
-                    submitLock.current = false;
                     setIsProcessing(false);
                     return;
                  }
@@ -455,7 +449,7 @@ const OrdersView = () => {
         setEditingId(null);
         setForm({ customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد', deliveryDate: '', globalNotes: '', deliveryFee: '', items: [{ ...initialItemState }], totalPrice: 0 });
     } finally {
-        setTimeout(() => { submitLock.current = false; setIsProcessing(false); }, 1500);
+        setIsProcessing(false);
     }
   };
 
@@ -826,12 +820,10 @@ const ProductionView = () => {
   const [orderType, setOrderType] = useState(''); 
   const [completionModal, setCompletionModal] = useState({ isOpen: false, order: null, finalImage: '' });
   
-  const isProcessing = useRef(false); // تعديل ليصبح Ref
-  const [uiProcessing, setUiProcessing] = useState(false); // للحالة الظاهرية فقط
+  const isProcessing = useRef(false);
+  const [uiProcessing, setUiProcessing] = useState(false);
+  const actionLock = useRef(new Set()); 
 
-  const actionLock = useRef(new Set()); // قفل مخصص لمنع تكرار نفس الطلب نهائياً
-
-  // فلترة الطلبات حسب التاريخ (فولدرات يومية)
   const groupOrdersByDate = (ordersList) => {
      return ordersList.reduce((acc, o) => {
         const dObj = o.deliveryDate ? new Date(o.deliveryDate) : null;
@@ -911,17 +903,15 @@ const ProductionView = () => {
             cogs: totalCogs,
             materialsDeducted: true 
          });
-         setSelectedOrder(null);
          
-         if (missingRecipes.length > 0) {
-             showNotification(`⚠️ بدأ التحضير، لكن لم تخصم مواد لصنف (${missingRecipes.join('، ')}) لعدم وجود معادلة.`);
-         } else if (deductedItemsCount > 0) {
-             showNotification("✅ تم البدء بالتحضير وخصم المواد من المستودع بنجاح!");
-         } else {
-             showNotification("✅ تم نقل الطلب إلى مرحلة جاري التحضير.");
-         }
+         setSelectedOrder(null); 
+         if (missingRecipes.length > 0) showNotification(`⚠️ بدأ التحضير، لكن لم تخصم مواد لصنف (${missingRecipes.join('، ')}) لعدم وجود معادلة.`);
+         else if (deductedItemsCount > 0) showNotification("✅ تم البدء بالتحضير وخصم المواد من المستودع بنجاح!");
+         else showNotification("✅ تم نقل الطلب إلى مرحلة جاري التحضير.");
+     } catch(e) {
+         actionLock.current.delete(order.id);
      } finally {
-         setTimeout(() => { isProcessing.current = false; setUiProcessing(false); }, 1500);
+         isProcessing.current = false; setUiProcessing(false);
      }
   };
 
@@ -959,8 +949,10 @@ const ProductionView = () => {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
         setCompletionModal({ isOpen: false, order: null, finalImage: '' });
         showNotification("✅ تم إنجاز الطلب وهو جاهز الآن للتوصيل!");
+    } catch(e) {
+        actionLock.current.delete(completionModal.order?.id);
     } finally {
-        setTimeout(() => { isProcessing.current = false; setUiProcessing(false); }, 1500);
+        isProcessing.current = false; setUiProcessing(false);
     }
   };
 
@@ -1124,7 +1116,7 @@ const FinishedGoodsView = () => {
         setAddModalOpen(false);
         setForm({ code: '', name: '', quantity: 1, price: '', image: '' });
     } finally {
-        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+        submitLock.current = false; setUiProcessing(false);
     }
   };
 
@@ -1142,7 +1134,7 @@ const FinishedGoodsView = () => {
          setAddStockModal(null);
          setAddQty(1);
      } finally {
-         setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+         submitLock.current = false; setUiProcessing(false);
      }
   };
 
@@ -1155,7 +1147,7 @@ const FinishedGoodsView = () => {
         showNotification("تم حذف المنتج بنجاح.");
         setDeleteFGModal(null);
     } finally {
-        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+        submitLock.current = false; setUiProcessing(false);
     }
   };
 
@@ -1185,17 +1177,19 @@ const FinishedGoodsView = () => {
         };
 
         if (sellForm.type === 'direct') {
+          // استخدام معرف فريد للفاتورة المباشرة
+          const docId = `DIR_${Date.now()}`;
           if(sellForm.paymentType === 'نقد') {
-             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { category: 'revenue', type: 'income', amount: totalRevenue, description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now });
+             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', `REV_${docId}`), { category: 'revenue', type: 'income', amount: totalRevenue, description: `بيع مباشر (مخزن تام): ${sellQty}x ${selectedItem.name}`, date: now });
           }
           const receiptData = {
-            ...baseOrderData, id: 'DIR-' + Date.now().toString().slice(-6),
+            ...baseOrderData, id: docId,
             customerName: 'بيع مباشر (مخزن تام)', phone: '-', address: 'تسليم باليد', contactMethod: 'مباشر',
             status: 'completed', completedAt: now, printType: 'receipt', cashStatus: sellForm.paymentType === 'نقد' ? 'received_by_finance' : 'credit_unpaid',
             receivedByUid: user.uid, receivedByName: myProfile?.name || 'غير معروف' 
           };
 
-          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), receiptData);
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', docId), receiptData);
           showNotification("تم إخراج المنتج وتسجيل البيع بنجاح.");
           setPrintData(receiptData); 
         } else {
@@ -1213,7 +1207,7 @@ const FinishedGoodsView = () => {
         setSellQty(1);
         setSellForm({ type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' });
     } finally {
-        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+        submitLock.current = false; setUiProcessing(false);
     }
   };
 
@@ -1355,8 +1349,10 @@ const DeliveryView = () => {
     try {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { status: 'out_for_delivery', dispatchedAt: new Date().toISOString() });
         setSelectedOrder(null);
+    } catch(e) {
+        actionLock.current.delete(order.id);
     } finally {
-        setTimeout(() => setUiProcessing(false), 1500);
+        setUiProcessing(false);
     }
   };
 
@@ -1383,8 +1379,10 @@ const DeliveryView = () => {
 
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), updateData);
         setSelectedOrder(null);
+    } catch(e) {
+        actionLock.current.delete(order.id);
     } finally {
-        setTimeout(() => setUiProcessing(false), 1500);
+        setUiProcessing(false);
     }
   };
 
@@ -1691,7 +1689,7 @@ const StoreView = () => {
         setModalOpen(false);
         setForm({ itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' });
     } finally {
-        setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+        submitLock.current = false; setUiProcessing(false);
     }
   };
 
@@ -1720,7 +1718,7 @@ const StoreView = () => {
               setDeleteInvModal(null);
           }
       } finally {
-          setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+          submitLock.current = false; setUiProcessing(false);
       }
   };
 
@@ -1795,7 +1793,7 @@ const StoreView = () => {
          setRecipeModalOpen(false);
          setSelectedMat(''); setSelectedMatQty('');
      } finally {
-         setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+         submitLock.current = false; setUiProcessing(false);
      }
   };
 
@@ -1810,7 +1808,7 @@ const StoreView = () => {
             setDeleteRecipeModal(null);
          }
      } finally {
-         setTimeout(() => { submitLock.current = false; setUiProcessing(false); }, 1500);
+         submitLock.current = false; setUiProcessing(false);
      }
   };
 
@@ -2039,9 +2037,9 @@ const FinanceView = () => {
   const [endDate, setEndDate] = useState('');
   const [form, setForm] = useState({ type: 'expense', category: 'operational', amount: '', description: '' });
   
-  const actionLock = useRef(new Set()); // قفل مخصص لمنع تكرار سداد النقدية
+  const actionLock = useRef(new Set()); 
   const submitLock = useRef(false);
-  const [uiProcessingId, setUiProcessingId] = useState(null); // للواجهة فقط
+  const [uiProcessingId, setUiProcessingId] = useState(null); 
 
   const expenseCategories = { 'operational': 'المصروفات التشغيلية', 'admin': 'المصروفات الإدارية', 'marketing': 'المصروفات التسويقية', 'non_operational': 'مصروفات غير تشغيلية', 'allowances': 'المخصصات', 'inventory_purchase': 'مشتريات مخزون', 'other_expense': 'أخرى' };
   const incomeCategories = { 'revenue': 'إيرادات المبيعات', 'other_income': 'إيرادات أخرى' };
@@ -2090,53 +2088,88 @@ const FinanceView = () => {
         setModalOpen(false);
         setForm({ type: 'expense', category: 'operational', amount: '', description: '' });
     } finally {
-        setTimeout(() => { submitLock.current = false; setUiProcessingId(null); }, 1500);
+        submitLock.current = false; setUiProcessingId(null);
     }
   };
 
   const confirmDriverCash = async (order) => {
      if(actionLock.current.has(order.id)) return;
+     
+     // فحص أمني مضاعف قبل الإرسال لمنع التكرار
+     if(order.cashStatus === 'received_by_finance') {
+         showNotification("تم استلام النقدية لهذا الطلب مسبقاً.");
+         return;
+     }
+
      actionLock.current.add(order.id);
      setUiProcessingId(order.id);
      try {
          const now = new Date().toISOString();
+         
+         // 1. إنشاء هوية فريدة للحركة المالية تعتمد على رقم الطلب لضمان عدم التكرار مطلقاً في السيرفر
+         const transactionRef = doc(db, 'artifacts', appId, 'public', 'data', 'transactions', `REV_${order.id}`);
+         const txSnap = await getDoc(transactionRef);
+         if (txSnap.exists()) {
+             showNotification("تم تسجيل هذا الإيراد مسبقاً في السجلات.");
+             return;
+         }
+
+         // 2. تحديث الطلب أولاً
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
             status: 'completed',
             cashStatus: 'received_by_finance',
             receivedByUid: user.uid,
             receivedByName: myProfile?.name || 'غير معروف'
          });
-         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+
+         // 3. إنشاء قيد مالي غير قابل للتكرار
+         await setDoc(transactionRef, {
             category: 'revenue', type: 'income', amount: Number(order.price), description: `تحصيل نقدية مندوب لطلب: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
          });
-         showNotification("تم استلام النقدية وتسجيلها في الإيرادات.");
-     } catch (e) {
-         actionLock.current.delete(order.id); // فتح القفل فقط في حال فشل السيرفر
+
+         showNotification("تم استلام النقدية وتسجيلها في الإيرادات بنجاح.");
+     } catch(e) {
+         actionLock.current.delete(order.id);
      } finally {
-         setTimeout(() => { setUiProcessingId(null); }, 1500);
+         setUiProcessingId(null);
      }
   };
 
   const confirmCreditPayment = async (order) => {
      if(actionLock.current.has(order.id)) return;
+     
+     if(order.cashStatus === 'received_by_finance') {
+         showNotification("تم سداد دين هذا الطلب مسبقاً.");
+         return;
+     }
+
      actionLock.current.add(order.id);
      setUiProcessingId(order.id);
      try {
          const now = new Date().toISOString();
+         const transactionRef = doc(db, 'artifacts', appId, 'public', 'data', 'transactions', `CREDIT_${order.id}`);
+         const txSnap = await getDoc(transactionRef);
+         if (txSnap.exists()) {
+             showNotification("تم تسجيل السداد مسبقاً.");
+             return;
+         }
+
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
             status: 'completed',
             cashStatus: 'received_by_finance',
             receivedByUid: user.uid,
             receivedByName: myProfile?.name || 'غير معروف'
          });
-         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+
+         await setDoc(transactionRef, {
             category: 'revenue', type: 'income', amount: Number(order.price), description: `سداد دين طلب آجل: ${order.customerName} #${formatOrderNum(order)}`, date: now, relatedOrderId: order.id
          });
-         showNotification("تم سداد الدين وتسجيله في الإيرادات.");
-     } catch (e) {
+
+         showNotification("تم سداد الدين وتسجيله في الإيرادات بنجاح.");
+     } catch(e) {
          actionLock.current.delete(order.id);
      } finally {
-         setTimeout(() => { setUiProcessingId(null); }, 1500);
+         setUiProcessingId(null);
      }
   };
 
@@ -2211,7 +2244,7 @@ const FinanceView = () => {
                      <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                      <td className="p-4 text-sm text-gray-600">مندوب التوصيل</td>
                      <td className="p-4 font-bold text-red-600">{formatMoney(o.price)} IQD</td>
-                     <td className="p-4"><button onClick={() => confirmDriverCash(o)} disabled={uiProcessingId === o.id || actionLock.current.has(o.id)} className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{uiProcessingId === o.id ? 'جاري المعالجة...' : <><ArrowRightLeft size={14}/> استلام النقدية</>}</button></td>
+                     <td className="p-4"><button onClick={() => confirmDriverCash(o)} disabled={uiProcessingId === o.id} className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{uiProcessingId === o.id ? 'جاري المعالجة...' : <><ArrowRightLeft size={14}/> استلام النقدية</>}</button></td>
                   </tr>
                ))}
                {driverCashOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد مبالغ معلقة عند السائقين.</td></tr>}
@@ -2230,7 +2263,7 @@ const FinanceView = () => {
                      <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
                      <td className="p-4 font-mono text-xs dir-ltr text-right">{o.phone || '-'}</td>
                      <td className="p-4 font-bold text-orange-600">{formatMoney(o.price)} IQD</td>
-                     <td className="p-4"><button onClick={() => confirmCreditPayment(o)} disabled={uiProcessingId === o.id || actionLock.current.has(o.id)} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{uiProcessingId === o.id ? 'جاري المعالجة...' : <><CheckCircle size={14}/> تسديد الدين</>}</button></td>
+                     <td className="p-4"><button onClick={() => confirmCreditPayment(o)} disabled={uiProcessingId === o.id} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">{uiProcessingId === o.id ? 'جاري المعالجة...' : <><CheckCircle size={14}/> تسديد الدين</>}</button></td>
                   </tr>
                ))}
                {creditOrders.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد ديون مسجلة.</td></tr>}
