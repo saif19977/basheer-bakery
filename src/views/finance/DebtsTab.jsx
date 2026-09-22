@@ -12,7 +12,7 @@ export const DebtsTab = ({ creditOrders, isRowBusy, onSettle }) => (
           <td className="p-4 text-sm">{formatDate(o.createdAt)}</td>
           <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
           <td className="p-4 font-mono text-xs dir-ltr text-right">{o.phone || '-'}</td>
-          <td className="p-4 font-bold text-orange-600">{formatMoney(o.price)} IQD</td>
+          <td className="p-4 font-bold text-orange-600">{formatMoney(o.remainingDebt ?? o.price)} IQD</td>
           <td className="p-4">
             <button onClick={() => onSettle(o)} disabled={isRowBusy(o.id)} className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">
               {isRowBusy(o.id) ? 'جاري المعالجة...' : <><CheckCircle size={14} /> تسديد الدين</>}

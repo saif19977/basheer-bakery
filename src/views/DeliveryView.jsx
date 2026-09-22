@@ -7,6 +7,7 @@ import { DeliveryOrderCard } from './delivery/DeliveryOrderCard';
 import { useActionLock } from '../hooks/useActionLock';
 import { dispatchOrderForDelivery, markOrderDelivered } from '../services/ordersService';
 import { formatDate, formatOrderNum, safeStr } from '../utils/format';
+import { PAYMENT_TYPE_BADGE_CLASS } from '../constants/paymentTypes';
 
 const ACTIVE_STATUSES = ['pending', 'baking', 'ready', 'out_for_delivery'];
 
@@ -46,10 +47,13 @@ export const DeliveryView = () => {
     try {
       await dispatchOrderForDelivery(order.id);
       setSelectedOrder(null);
-    } catch {
-      actionLock.release(order.id);
+    } catch (e) {
+      console.error(e);
+      showNotification('❌ حدث خطأ أثناء إرسال الطلب مع السائق، يرجى المحاولة مرة أخرى.');
     } finally {
-      actionLock.finish();
+      // finishAndRelease وليس finish فقط: نفس الطلب سينتقل لاحقاً لمرحلة
+      // "تم التسليم"، فلا يجوز أن يبقى مقفلاً بعد نجاح هذه المرحلة.
+      actionLock.finishAndRelease(order.id);
     }
   };
 
@@ -57,16 +61,17 @@ export const DeliveryView = () => {
     if (actionLock.isLocked(order.id)) return;
     actionLock.lock(order.id);
     try {
-      const isCash = order.paymentType === 'نقد' || !order.paymentType;
-      showNotification(isCash
+      const hasCashToCollect = Number(order.paidAmount ?? order.price ?? 0) > 0;
+      showNotification(hasCashToCollect
         ? 'تم تسليم الطلب. يرجى تسليم النقدية لقسم الحسابات.'
         : 'تم تسليم الطلب بالآجل. الدين مسجل الآن في الحسابات.');
-      await markOrderDelivered(order, { user, myProfile }, isCash);
+      await markOrderDelivered(order, { user, myProfile }, hasCashToCollect);
       setSelectedOrder(null);
-    } catch {
-      actionLock.release(order.id);
+    } catch (e) {
+      console.error(e);
+      showNotification('❌ حدث خطأ أثناء تأكيد التسليم، يرجى المحاولة مرة أخرى.');
     } finally {
-      actionLock.finish();
+      actionLock.finishAndRelease(order.id);
     }
   };
 
@@ -130,7 +135,7 @@ export const DeliveryView = () => {
                 <a href={`https://wa.me/${String(o.phone).replace(/[^0-9+]/g, '')}`} target="_blank" rel="noreferrer" className="text-green-500 hover:text-green-700"><Phone size={14} /></a>
                 {o.phone || '-'}
               </td>
-              <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${o.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
+              <td className="p-4"><span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${PAYMENT_TYPE_BADGE_CLASS[o.paymentType] || 'bg-green-50 text-green-700 border-green-200'}`}>{o.paymentType || 'نقد'}</span></td>
               <td className="p-4 text-sm text-gray-500">{formatDate(o.completedAt)}</td>
               <td className="p-4 text-sm text-gray-600 truncate max-w-[150px]" title={o.address}>{o.address || '-'}</td>
               <td className="p-4"><button onClick={() => setPrintData({ ...o, printType: 'invoice' })} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors"><Printer size={16} /></button></td>

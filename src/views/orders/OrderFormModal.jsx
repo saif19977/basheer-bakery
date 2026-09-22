@@ -2,6 +2,8 @@ import { Loader2, Plus } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { OrderItemEditor } from './OrderItemEditor';
 import { formatMoney } from '../../utils/format';
+import { PAYMENT_TYPE_OPTIONS, PAYMENT_TYPE_PARTIAL } from '../../constants/paymentTypes';
+import { computePaymentSplit } from '../../utils/payment';
 
 // نموذج إنشاء/تعديل طلب. كل الحالة تُدار في useOrderForm (الهوك المستدعي)،
 // وهذا المكوّن مسؤول فقط عن العرض وربط الأحداث.
@@ -30,8 +32,28 @@ export const OrderFormModal = ({
           <div><label className="block text-xs font-bold text-gray-700 mb-1">اسم العميل</label><input type="text" required value={form.customerName} onChange={e => onFieldChange('customerName', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
           <div><label className="block text-xs font-bold text-gray-700 mb-1">رقم الهاتف</label><input type="text" required value={form.phone} onChange={e => onFieldChange('phone', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none dir-ltr text-right" /></div>
           <div><label className="block text-xs font-bold text-gray-700 mb-1">طريقة التواصل</label><select value={form.contactMethod} onChange={e => onFieldChange('contactMethod', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white"><option value="مباشر">مباشر (المحل)</option><option value="واتساب">واتساب</option><option value="فيسبوك">فيسبوك</option><option value="انستغرام">انستغرام</option></select></div>
-          <div><label className="block text-xs font-bold text-gray-700 mb-1">حالة الدفع</label><select value={form.paymentType} onChange={e => onFieldChange('paymentType', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white font-bold"><option value="نقد">نقد (استلام فوري/عند التوصيل)</option><option value="آجل">بالآجل (ديون على العميل)</option></select></div>
+          <div><label className="block text-xs font-bold text-gray-700 mb-1">حالة الدفع</label><select value={form.paymentType} onChange={e => onFieldChange('paymentType', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white font-bold">{PAYMENT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
         </div>
+
+        {form.paymentType === PAYMENT_TYPE_PARTIAL && (() => {
+          const { paidAmount, remainingDebt } = computePaymentSplit({ paymentType: form.paymentType, totalPrice: form.totalPrice, paidAmount: form.paidAmount });
+          return (
+            <div className="mb-4 bg-amber-50 p-3 rounded-lg border border-amber-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-amber-900 mb-1">المبلغ المدفوع الآن (IQD)</label>
+                <input type="number" required min="0" max={form.totalPrice || undefined} step="1" value={form.paidAmount} onChange={e => onFieldChange('paidAmount', e.target.value)} className="w-full p-2.5 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none font-bold" />
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-red-200 flex flex-col justify-center">
+                <span className="text-xs font-bold text-red-700">المبلغ المتبقي كدين على العميل</span>
+                <span className="text-lg font-bold text-red-600">{formatMoney(remainingDebt)} IQD</span>
+              </div>
+              {paidAmount !== Number(form.paidAmount || 0) && (
+                <p className="col-span-full text-[10px] text-amber-700">لا يمكن أن يتجاوز المبلغ المدفوع إجمالي الطلب — سيُحفظ كحد أقصى {formatMoney(paidAmount)} IQD.</p>
+              )}
+            </div>
+          );
+        })()}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div><label className="block text-xs font-bold text-gray-700 mb-1">عنوان التوصيل الدقيق</label><input type="text" required value={form.address} onChange={e => onFieldChange('address', e.target.value)} className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" /></div>
           <div className="flex gap-2">

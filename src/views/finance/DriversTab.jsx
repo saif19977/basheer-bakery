@@ -12,7 +12,7 @@ export const DriversTab = ({ driverCashOrders, isRowBusy, onReceive }) => (
           <td className="p-4 text-sm">{formatDate(o.completedAt)}</td>
           <td className="p-4 font-bold text-sm">{o.customerName || 'غير محدد'}</td>
           <td className="p-4 text-sm text-gray-600">مندوب التوصيل</td>
-          <td className="p-4 font-bold text-red-600">{formatMoney(o.price)} IQD</td>
+          <td className="p-4 font-bold text-red-600">{formatMoney(o.paidAmount ?? o.price)} IQD</td>
           <td className="p-4">
             <button onClick={() => onReceive(o)} disabled={isRowBusy(o.id)} className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold flex items-center gap-1">
               {isRowBusy(o.id) ? 'جاري المعالجة...' : <><ArrowRightLeft size={14} /> استلام النقدية</>}

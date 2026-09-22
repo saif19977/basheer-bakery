@@ -4,11 +4,15 @@ import { useCallback, useRef, useState } from 'react';
 // الطلب/السجل أثناء انتظار السيرفر. مع withGlobalLock:true يُضاف قفل عام إضافي
 // يمنع أي إجراء آخر (على أي id) من التنفيذ في نفس اللحظة.
 //
-// ملاحظة مهمة: القفل الخاص بعنصر معيّن لا يُفتح تلقائياً بعد النجاح — فقط
-// release(id) صريحة (تُستدعى عادة داخل catch عند الفشل) تفتحه، بينما finish()
-// تُستدعى دائماً (عادة داخل finally) لإعادة مؤشر "قيد المعالجة" في الواجهة فقط.
-// هذا يطابق النمط الأصلي المقصود: منع إعادة تنفيذ الإجراء على نفس العنصر بعد
-// نجاحه، مع السماح بإعادة المحاولة عند الفشل.
+// هناك نمطان للاستخدام:
+// 1) إجراء نهائي لمرة واحدة على نفس العنصر (مثل استلام نقدية طلب معيّن في
+//    المالية): استخدم lock() + finish() دائماً، مع release(id) فقط عند الفشل
+//    داخل catch — بذلك يبقى العنصر مقفلاً نهائياً بعد النجاح فلا يُعاد تنفيذ
+//    نفس الإجراء عليه مرة أخرى.
+// 2) إجراء ضمن سلسلة مراحل متتالية على نفس العنصر (مثل انتقال الطلب عبر عدة
+//    حالات في الإنتاج أو التوصيل): استخدم finishAndRelease(id) دائماً — يجب
+//    ألا يبقى القفل بعد نجاح مرحلة واحدة، وإلا تُحظر كل المراحل التالية على
+//    نفس رقم الطلب بصمت.
 export function useActionLock({ withGlobalLock = false } = {}) {
   const lockedIds = useRef(new Set());
   const globalLock = useRef(false);
@@ -34,7 +38,16 @@ export function useActionLock({ withGlobalLock = false } = {}) {
     setProcessingId(null);
   }, [withGlobalLock]);
 
+  // يفتح قفل العنصر ويُنهي مؤشر المعالجة معاً — للاستخدام في finally عند
+  // إجراء ضمن سلسلة مراحل متتالية (انظر النمط 2 أعلاه)، بحيث تبقى المراحل
+  // التالية على نفس العنصر قابلة للتنفيذ سواء نجح الإجراء الحالي أو فشل.
+  const finishAndRelease = useCallback((id) => {
+    lockedIds.current.delete(id);
+    if (withGlobalLock) globalLock.current = false;
+    setProcessingId(null);
+  }, [withGlobalLock]);
+
   const isProcessing = useCallback((id) => processingId === id, [processingId]);
 
-  return { isLocked, lock, release, finish, isProcessing, processingId };
+  return { isLocked, lock, release, finish, finishAndRelease, isProcessing, processingId };
 }

@@ -66,7 +66,7 @@ export const OrdersView = () => {
   const filteredOrders = useMemo(() => filterOrders(orders, { searchTerm, filter }), [orders, searchTerm, filter]);
 
   const orderForm = useOrderForm({
-    dynamicCategories, finishedGoods, orders, user, myProfile, uploadToStorage, showNotification, submitLock,
+    dynamicCategories, finishedGoods, user, myProfile, uploadToStorage, showNotification, submitLock,
   });
 
   const confirmCancelOrder = async () => {
@@ -132,6 +132,7 @@ export const OrdersView = () => {
                   </div>
                 ))}
                 <div className="font-bold text-amber-600 mt-1 border-t pt-1 border-gray-100">الإجمالي: {formatMoney(o.price)} IQD</div>
+                {Number(o.remainingDebt || 0) > 0 && <div className="text-[10px] font-bold text-red-600">متبقٍ كدين: {formatMoney(o.remainingDebt)} IQD</div>}
               </td>
               <td className="p-4"><Countdown deliveryDate={o.deliveryDate} /></td>
               <td className="p-4"><StatusBadge status={o.status || 'pending'} /></td>

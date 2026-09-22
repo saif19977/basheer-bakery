@@ -67,7 +67,14 @@ export const InvoiceOrProductionPrint = ({ printData }) => {
         </div>
 
         {!isProductionPrint && (
-          <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl font-bold text-center"><strong>الإجمالي المستحق للطلب:</strong> {formatMoney(printData.price)} IQD</p>
+          <>
+            <p className="p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xl font-bold text-center"><strong>الإجمالي المستحق للطلب:</strong> {formatMoney(printData.price)} IQD</p>
+            {Number(printData.remainingDebt || 0) > 0 && (
+              <p className="p-3 bg-red-50 text-red-800 border border-red-200 rounded-lg text-center font-bold">
+                مدفوع الآن: {formatMoney(printData.paidAmount)} IQD — متبقٍ كدين على العميل: {formatMoney(printData.remainingDebt)} IQD
+              </p>
+            )}
+          </>
         )}
 
         {printData.notes && <p className="p-4 border rounded-lg bg-yellow-50"><strong>ملاحظات التوصيل:</strong> {printData.notes}</p>}

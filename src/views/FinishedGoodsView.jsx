@@ -11,7 +11,7 @@ import { addOrRestockFinishedGood, addStockToFinishedGood, deleteFinishedGood, s
 import { safeStr } from '../utils/format';
 
 const EMPTY_PRODUCT_FORM = { code: '', name: '', quantity: 1, price: '', image: '' };
-const EMPTY_SELL_FORM = { type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد' };
+const EMPTY_SELL_FORM = { type: 'direct', customerName: '', phone: '', address: '', paymentType: 'نقد', paidAmount: '' };
 
 export const FinishedGoodsView = () => {
   const { finishedGoods, setPrintData, user, myProfile, showNotification, uploadToStorage } = useAppContext();

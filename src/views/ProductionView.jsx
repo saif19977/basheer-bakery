@@ -79,10 +79,14 @@ export const ProductionView = () => {
       } else {
         showNotification('✅ تم نقل الطلب إلى مرحلة جاري التحضير.');
       }
-    } catch {
-      actionLock.release(order.id);
+    } catch (e) {
+      console.error(e);
+      showNotification('❌ حدث خطأ أثناء بدء التحضير، يرجى المحاولة مرة أخرى.');
     } finally {
-      actionLock.finish();
+      // finishAndRelease وليس finish فقط: الطلب سينتقل لاحقاً لمرحلة أخرى
+      // (تأكيد الإنجاز) على نفس المعرّف، فلا يجوز أن يبقى مقفلاً بعد نجاح
+      // هذه المرحلة وإلا تُحظر المرحلة التالية بصمت.
+      actionLock.finishAndRelease(order.id);
     }
   };
 
@@ -113,10 +117,11 @@ export const ProductionView = () => {
       await completeProductionOrder(orderId, completionModal.finalImage);
       setCompletionModal({ isOpen: false, order: null, finalImage: '' });
       showNotification('✅ تم إنجاز الطلب وهو جاهز الآن للتوصيل!');
-    } catch {
-      actionLock.release(orderId);
+    } catch (e) {
+      console.error(e);
+      showNotification('❌ حدث خطأ أثناء تأكيد الإنجاز، يرجى المحاولة مرة أخرى.');
     } finally {
-      actionLock.finish();
+      actionLock.finishAndRelease(orderId);
     }
   };
 

@@ -57,6 +57,7 @@ export default function App() {
   const {
     user, authLoading, profilesLoaded, showSkipLoading, forceSkipLoading,
     profiles, orders, inventory, inventoryLogs, recipes, finishedGoods, transactions,
+    customers, unpaidCreditOrders, pendingDriverCashOrders,
   } = useAppData({ onNewOrder: () => showNotification('🔔 تم إضافة طلب جديد!') });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -95,6 +96,7 @@ export default function App() {
     <ErrorBoundary>
       <AppContext.Provider value={{
         orders, inventory, inventoryLogs, recipes, finishedGoods, transactions, profiles,
+        customers, unpaidCreditOrders, pendingDriverCashOrders,
         user, myProfile, isManagerOrAdmin, dynamicCategories,
         setActiveTab, showNotification, setPrintData, setZoomedImage, uploadToStorage: uploadImageToStorage,
       }}>
