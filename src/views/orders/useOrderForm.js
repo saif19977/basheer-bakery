@@ -12,7 +12,7 @@ const emptyItem = (dynamicCategories) => {
 };
 
 const emptyForm = (dynamicCategories) => ({
-  customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد',
+  customerName: '', phone: '', address: '', contactMethod: 'واتساب', paymentType: 'نقد', paidAmount: '',
   deliveryDate: '', globalNotes: '', deliveryFee: '',
   items: [emptyItem(dynamicCategories)],
   totalPrice: 0,
@@ -26,7 +26,7 @@ const calculateTotal = (items, delivery) => {
 // يدير كل حالة نموذج إنشاء/تعديل الطلب: الفتح/الإغلاق، تعبئة الحقول، إدارة
 // الأصناف وصورها، وحفظ الطلب. مفصول عن OrdersView كي تبقى تلك الشاشة مسؤولة
 // فقط عن عرض القائمة والتصفية.
-export function useOrderForm({ dynamicCategories, finishedGoods, orders, user, myProfile, uploadToStorage, showNotification, submitLock }) {
+export function useOrderForm({ dynamicCategories, finishedGoods, user, myProfile, uploadToStorage, showNotification, submitLock }) {
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [isUploadingImg, setIsUploadingImg] = useState(false);
@@ -43,6 +43,7 @@ export function useOrderForm({ dynamicCategories, finishedGoods, orders, user, m
     setForm({
       customerName: order.customerName || '', phone: order.phone || '', address: order.address || '',
       contactMethod: order.contactMethod || 'مباشر', paymentType: order.paymentType || 'نقد',
+      paidAmount: order.paidAmount ?? '',
       deliveryDate: order.deliveryDate || '', globalNotes: order.notes || '', deliveryFee: order.deliveryFee || '',
       items: getOrderItems(order),
       totalPrice: order.price || 0,
@@ -143,7 +144,10 @@ export function useOrderForm({ dynamicCategories, finishedGoods, orders, user, m
     if (submitLock.isLocked() || isUploadingImg) return;
     submitLock.lock();
     try {
-      const orderPayload = { ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes, deliveryFee: Number(form.deliveryFee || 0) };
+      const orderPayload = {
+        ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes,
+        deliveryFee: Number(form.deliveryFee || 0), paidAmount: Number(form.paidAmount || 0),
+      };
 
       if (!editingId) {
         const stockResult = await deductReadyMadeStock(orderPayload.items, finishedGoods);
@@ -154,7 +158,7 @@ export function useOrderForm({ dynamicCategories, finishedGoods, orders, user, m
         }
       }
 
-      await saveOrder({ editingId, orderPayload, orders, user, myProfile });
+      await saveOrder({ editingId, orderPayload, user, myProfile });
       if (!editingId) showNotification('تم حفظ الطلب بنجاح.');
 
       setModalOpen(false);

@@ -29,7 +29,10 @@ const withinDateRange = (dateValue, startDate, endDate) => {
 };
 
 export const FinanceView = () => {
-  const { orders, transactions, user, myProfile, showNotification, setPrintData } = useAppContext();
+  const {
+    orders, transactions, unpaidCreditOrders, pendingDriverCashOrders,
+    user, myProfile, showNotification, setPrintData,
+  } = useAppContext();
 
   const [isModalOpen, setModalOpen] = useState(false);
   const [subTab, setSubTab] = useState('pl');
@@ -52,13 +55,19 @@ export const FinanceView = () => {
   const filteredIncome = calcTotal(t => t.type === 'income');
   const filteredExpense = calcTotal(t => t.type === 'expense');
 
+  // ملاحظة: تقرير الأرباح (P&L) لا يزال يعتمد على مصفوفة الطلبات الأخيرة
+  // المحدودة (200) لحساب تكلفة البضاعة المباعة ضمن الفترة المختارة — هذا
+  // يكفي للفترات الحديثة، لكن فترة قديمة جداً قد تُغفل طلبات خارج هذا الحد.
+  // معالجة هذا بشكل كامل تتطلب تقارير تجميعية يومية منفصلة (خارج نطاق هذا الإصلاح).
   const plOrders = orders.filter(o => o && o.status === 'completed' && withinDateRange(o.completedAt, startDate, endDate));
   const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0);
   const netRevenue = filteredIncome - filteredExpense;
   const finalNetProfit = netRevenue - plCogs;
 
-  const driverCashOrders = orders.filter(o => o?.status === 'completed' && o?.paymentType === 'نقد' && o?.cashStatus === 'with_driver');
-  const creditOrders = orders.filter(o => o?.paymentType === 'آجل' && o?.cashStatus === 'credit_unpaid');
+  // مصدران مستقلان غير محدودين (انظر useAppData) بدل التصفية من مصفوفة
+  // الطلبات المحدودة — لا يختفي منهما دين أو مبلغ معلّق مهما قدُم تاريخه.
+  const driverCashOrders = pendingDriverCashOrders;
+  const creditOrders = unpaidCreditOrders;
 
   const handleSubmit = async (e) => {
     e.preventDefault();

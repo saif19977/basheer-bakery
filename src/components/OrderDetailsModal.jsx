@@ -4,6 +4,7 @@ import { Countdown } from './ui/Countdown';
 import { useAppContext } from '../context/AppContext';
 import { formatMoney, formatOrderNum } from '../utils/format';
 import { getItemDisplayName, getItemImages, getOrderItems } from '../utils/orderItems';
+import { PAYMENT_TYPE_BADGE_CLASS } from '../constants/paymentTypes';
 
 // نافذة تفاصيل طلب موحّدة تُستخدم من شاشتي الإنتاج والتوصيل، بأزرار إجراء
 // مختلفة حسب `type`. `hideSensitiveInfo` تُخفي بيانات العميل عن شاشة الإنتاج
@@ -25,10 +26,13 @@ export const OrderDetailsModal = ({ isOpen, onClose, order, type, onPrimaryActio
                 <p className="font-bold text-gray-800 text-lg">{order.customerName || 'غير محدد'}</p>
                 <div className="flex gap-2 mt-1">
                   <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1"><Phone size={10} /> {order.contactMethod || 'مباشر'}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded border font-bold ${order.paymentType === 'آجل' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-green-100 text-green-800 border-green-200'}`}>{order.paymentType || 'نقد'}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded border font-bold ${PAYMENT_TYPE_BADGE_CLASS[order.paymentType] || 'bg-green-100 text-green-800 border-green-200'}`}>{order.paymentType || 'نقد'}</span>
                 </div>
               </div>
-              <span className="font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 text-lg">{formatMoney(order.price)} IQD</span>
+              <div className="text-left">
+                <span className="font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 text-lg block">{formatMoney(order.price)} IQD</span>
+                {Number(order.remainingDebt || 0) > 0 && <span className="text-[10px] font-bold text-red-600 block mt-1">متبقٍ كدين: {formatMoney(order.remainingDebt)} IQD</span>}
+              </div>
             </div>
             <div className="flex items-center gap-2 mb-2">
               <p className="text-sm text-gray-600 dir-ltr font-mono font-bold">{order.phone || '-'}</p>

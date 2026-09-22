@@ -1,6 +1,7 @@
 import { Clock } from 'lucide-react';
 import { Countdown } from '../../components/ui/Countdown';
 import { formatDate, formatOrderNum } from '../../utils/format';
+import { PAYMENT_TYPE_BADGE_CLASS } from '../../constants/paymentTypes';
 
 const THEMES = {
   yellow: { container: 'border-yellow-200 bg-yellow-50 hover:bg-yellow-100', orderNum: 'text-yellow-600' },
@@ -23,7 +24,7 @@ export const DeliveryOrderCard = ({ order, color, onSelect }) => {
       </div>
 
       <div className="mt-auto pt-2 flex justify-between items-center">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${order.paymentType === 'آجل' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>{order.paymentType || 'نقد'}</span>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${PAYMENT_TYPE_BADGE_CLASS[order.paymentType] || 'bg-green-50 text-green-700 border-green-200'}`}>{order.paymentType || 'نقد'}</span>
         <Countdown deliveryDate={order.deliveryDate} />
       </div>
     </div>
