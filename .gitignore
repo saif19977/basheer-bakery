@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Backfill script local state — never commit progress cursors or service
+# account keys used to run scripts/backfill-phase3.mjs.
+scripts/.backfill-cursor.json
+scripts/*serviceAccount*.json
+*.serviceAccountKey.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

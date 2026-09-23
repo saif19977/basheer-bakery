@@ -35,7 +35,6 @@ export function useAppData({ onNewOrder } = {}) {
   const [profiles, setProfiles] = useState([]);
   const [orders, setOrders] = useState([]);
   const [inventory, setInventory] = useState([]);
-  const [inventoryLogs, setInventoryLogs] = useState([]);
   const [recipes, setRecipes] = useState([]);
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -82,7 +81,6 @@ export function useAppData({ onNewOrder } = {}) {
     });
 
     const unsubInventory = onSnapshot(dataCollection('inventory'), (snap) => setInventory(snapshotToRecords(snap)));
-    const unsubInvLogs = onSnapshot(dataCollection('inventory_logs'), (snap) => setInventoryLogs(sortByDateDesc(snapshotToRecords(snap), 'date')));
     const unsubRecipes = onSnapshot(dataCollection('recipes'), (snap) => setRecipes(snapshotToRecords(snap)));
     const unsubFinished = onSnapshot(dataCollection('finished_goods'), (snap) => setFinishedGoods(snapshotToRecords(snap)));
     const unsubTransactions = onSnapshot(dataCollection('transactions'), (snap) => setTransactions(sortByDateDesc(snapshotToRecords(snap), 'date')));
@@ -101,7 +99,7 @@ export function useAppData({ onNewOrder } = {}) {
     const unsubDriverCash = onSnapshot(driverCashQuery, (snap) => setPendingDriverCashOrders(snapshotToRecords(snap)));
 
     return () => {
-      unsubProfiles(); unsubOrders(); unsubInventory(); unsubInvLogs();
+      unsubProfiles(); unsubOrders(); unsubInventory();
       unsubRecipes(); unsubFinished(); unsubTransactions();
       unsubCustomers(); unsubDebts(); unsubDriverCash();
     };
@@ -111,7 +109,7 @@ export function useAppData({ onNewOrder } = {}) {
   return {
     user, authLoading, profilesLoaded, showSkipLoading,
     forceSkipLoading: () => setProfilesLoaded(true),
-    profiles, orders, inventory, inventoryLogs, recipes, finishedGoods, transactions,
+    profiles, orders, inventory, recipes, finishedGoods, transactions,
     customers, unpaidCreditOrders, pendingDriverCashOrders,
   };
 }
