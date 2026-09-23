@@ -7,6 +7,7 @@ import { RecipesTab } from './store/RecipesTab';
 import { InventoryFormModal } from './store/InventoryFormModal';
 import { RecipeFormModal } from './store/RecipeFormModal';
 import { useSubmitLock } from '../hooks/useSubmitLock';
+import { useInventoryLogs } from '../hooks/useInventoryLogs';
 import { adjustInventoryQuantity, deleteInventoryItem, purchaseInventory, updateInventoryItem } from '../services/inventoryService';
 import { deleteRecipe, saveRecipe as saveRecipeService } from '../services/recipesService';
 
@@ -20,9 +21,10 @@ const SUB_TABS = [
 ];
 
 export const StoreView = () => {
-  const { inventory, inventoryLogs, recipes, user, showNotification, dynamicCategories } = useAppContext();
+  const { inventory, recipes, user, showNotification, dynamicCategories } = useAppContext();
 
   const [subTab, setSubTab] = useState('inventory');
+  const inventoryLogs = useInventoryLogs(subTab === 'logs');
 
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingInvId, setEditingInvId] = useState(null);
@@ -177,7 +179,13 @@ export const StoreView = () => {
         <InventoryTab inventory={inventory} user={user} onOpenNew={openNewInventoryModal} onEdit={handleEditInventory} onDelete={setDeleteInvModal} onAdjustQty={handleAdjustQty} />
       )}
 
-      {subTab === 'logs' && <LogsTab inventoryLogs={inventoryLogs} />}
+      {subTab === 'logs' && (
+        <LogsTab
+          inventoryLogs={inventoryLogs.logs} isLoading={inventoryLogs.isLoading}
+          isLoadingMore={inventoryLogs.isLoadingMore} hasMore={inventoryLogs.hasMore}
+          onLoadMore={inventoryLogs.loadMore} onRefresh={inventoryLogs.refresh}
+        />
+      )}
 
       {subTab === 'recipes' && (
         <RecipesTab recipes={recipes} inventory={inventory} user={user} onOpenNew={openNewRecipeModal} onEdit={handleEditRecipe} onDelete={setDeleteRecipeModal} />
