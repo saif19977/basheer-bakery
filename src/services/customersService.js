@@ -1,5 +1,5 @@
-import { arrayUnion, increment, setDoc } from 'firebase/firestore';
-import { dataDoc } from '../firebase/paths';
+import { addDoc, arrayUnion, increment, setDoc } from 'firebase/firestore';
+import { dataCollection, dataDoc } from '../firebase/paths';
 
 // دليل عملاء دائم منفصل عن مصفوفة الطلبات المحدودة (limit(200))، بحيث لا
 // يختفي عميل قديم بمجرد تجاوز عدد الطلبات لحد الاستعلام. مستند واحد لكل رقم
@@ -7,7 +7,9 @@ import { dataDoc } from '../firebase/paths';
 // arrayUnion بدل إعادة حساب كل شيء من الصفر في كل مرة.
 const NO_PHONE_CUSTOMER_ID = 'NO_PHONE';
 
-function customerIdFromPhone(phone) {
+// مُصدَّرة عمداً: الواجهة (سجل المحادثات) تحتاج نفس معرّف العميل بالضبط
+// لربط الملاحظات بالسجل الصحيح — معرّف واحد محسوب في مكان واحد لكل الاستخدامات.
+export function customerIdFromPhone(phone) {
   const cleaned = String(phone || '').trim().replace(/[^0-9+]/g, '');
   return cleaned || NO_PHONE_CUSTOMER_ID;
 }
@@ -45,4 +47,16 @@ export async function decrementCustomerOrderCount(phone) {
   await setDoc(dataDoc('customers', customerIdFromPhone(phone)), {
     orderCount: increment(-1),
   }, { merge: true });
+}
+
+// --- سجل المحادثات/الملاحظات (CRM) ---
+
+// ملاحظة دائمة على خط زمني واحد لكل عميل — طلب، مكالمة، أو أي تواصل خاص.
+// orderId اختياري: يربط الملاحظة بطلب محدد عند إضافتها من داخل شاشة الطلبات.
+export async function addCustomerNote({ customerId, orderId, text, authorUid, authorName }) {
+  await addDoc(dataCollection('customer_notes'), {
+    customerId, orderId: orderId || null, text,
+    authorUid, authorName: authorName || 'غير معروف',
+    createdAt: new Date().toISOString(),
+  });
 }
