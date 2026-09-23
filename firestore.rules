@@ -1,0 +1,134 @@
+rules_version = '2';
+
+// ============================================================================
+// قواعد أمان Firestore — بشير الشكرجي للحلويات والكيك
+//
+// كل بيانات النظام مخزّنة تحت مسار ثابت واحد:
+//   artifacts/cakeshop-production/public/data/{collectionName}/{docId}
+// (طابق src/firebase/config.js::appId + src/firebase/paths.js).
+//
+// كيفية التطبيق:
+//   Firebase Console → Firestore Database → Rules → الصق هذا الملف بالكامل
+//   → Publish. أو، إن كنت تستخدم Firebase CLI محلياً:
+//     firebase deploy --only firestore:rules
+//
+// المبدأ العام: أي طلب غير مسجَّل دخوله (auth == null) يُرفض تماماً من كل
+// مسار. بعد ذلك، كل مجموعة بيانات لها قاعدتها الخاصة أدناه — لا توجد قاعدة
+// "افتراضية تسمح بكل شيء"؛ أي مسار غير مذكور صراحة يُرفض تلقائياً.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // فقط مساحة العمل الحقيقية للتطبيق (appId ثابت، وليس أي قيمة يرسلها العميل).
+    match /artifacts/cakeshop-production/public/data {
+
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // ملف الموظف الحالي (الرتبة + الصلاحيات المخصصة)، لاستخدامه في فحوصات
+      // الرتبة أدناه. يُقرأ مرة واحدة فقط داخل كل قاعدة تحتاجه.
+      function myProfile() {
+        return get(/databases/$(database)/documents/artifacts/cakeshop-production/public/data/profiles/$(request.auth.uid)).data;
+      }
+
+      // نفس منطق usePermissions.js::hasAccess('Admin') تماماً: المدير العام
+      // دائماً، أو أي موظف مُنح صلاحية "Admin" صراحة ضمن customPermissions.
+      function isAdmin() {
+        return isSignedIn() &&
+          exists(/databases/$(database)/documents/artifacts/cakeshop-production/public/data/profiles/$(request.auth.uid)) &&
+          (myProfile().role == 'admin' ||
+           ('customPermissions' in myProfile() && 'Admin' in myProfile().customPermissions));
+      }
+
+      // نفس منطق usePermissions.js::isManagerOrAdmin (يُستخدم لحماية حذف
+      // القيود المالية — عملية حساسة تظهر فقط لهاتين الرتبتين في الواجهة).
+      function isManagerOrAdmin() {
+        return isSignedIn() &&
+          exists(/databases/$(database)/documents/artifacts/cakeshop-production/public/data/profiles/$(request.auth.uid)) &&
+          (myProfile().role == 'admin' || myProfile().role == 'manager');
+      }
+
+      // --- ملفات الموظفين (الرتب والصلاحيات) ---
+      // القراءة متاحة لأي موظف مسجَّل دخوله (تُستخدم لعرض "أُدخل بواسطة" وأسماء
+      // المستخدمين في عدة شاشات). الكتابة (إنشاء موظف / تعديل رتبة أو صلاحيات /
+      // حذف) مقصورة على المدير العام فقط — هذا يمنع أي حساب موظف عادي من
+      // ترقية نفسه إلى admin عبر كتابة مباشرة للمستند، بصرف النظر عمّا تعرضه
+      // الواجهة.
+      match /profiles/{profileId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+      }
+
+      // --- عداد أرقام الطلبات الذري ---
+      // أي موظف مسجَّل دخوله يحتاج لزيادته عند إنشاء طلب جديد (getNextOrderNumber
+      // عبر runTransaction)، لكن القيمة يجب أن ترتفع فقط ولا تنخفض أبداً — نفس
+      // الثغرة التي أُصلحت في الكود (تكرار أرقام الطلبات) يجب ألا تعود ممكنة
+      // حتى عبر كتابة مباشرة تتجاوز واجهة التطبيق.
+      match /metadata/counters {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if isSignedIn() &&
+          (!('orderNumber' in request.resource.data) ||
+           !('orderNumber' in resource.data) ||
+           request.resource.data.orderNumber >= resource.data.orderNumber);
+        allow delete: if false;
+      }
+
+      // --- دليل العملاء الدائم ---
+      // يُكتب تراكمياً (increment/arrayUnion) من عدة نقاط مختلفة في التطبيق
+      // (إنشاء طلب، تسليم، تحصيل دين) بواسطة أي موظف مسجّل دخوله. الحذف ممنوع
+      // تماماً — تنفيذاً حرفياً لمتطلب "يجب أن يبقى العملاء والديون محفوظين
+      // إلى الأبد".
+      match /customers/{customerId} {
+        allow read, create, update: if isSignedIn();
+        allow delete: if false;
+      }
+
+      // --- سجل المحادثات/الملاحظات (CRM) ---
+      // "خط زمني دائم" حسب الطلب الصريح: أي موظف يقرأ ويضيف ملاحظات، لكن لا
+      // أحد يعدّل أو يحذف ملاحظة بعد كتابتها (سجل تاريخي غير قابل للتزوير
+      // لاحقاً، تماماً كسجل محاسبي).
+      match /customer_notes/{noteId} {
+        allow read, create: if isSignedIn();
+        allow update, delete: if false;
+      }
+
+      // --- الطلبات ---
+      match /orders/{orderId} {
+        allow read, write: if isSignedIn();
+      }
+
+      // --- المخزون، حركاته، ومعادلات التصنيع (BOM) ---
+      match /inventory/{itemId} {
+        allow read, write: if isSignedIn();
+      }
+      match /inventory_logs/{logId} {
+        // سجل حركات دائم لأغراض التتبع والمطابقة المحاسبية — يُنشأ فقط، لا يُعدَّل
+        // أو يُحذف يدوياً (كل الاسترجاعات/التصحيحات تُسجَّل كحركة IN_CANCEL_REVERSAL
+        // جديدة بدل تعديل حركة قديمة).
+        allow read, create: if isSignedIn();
+        allow update, delete: if false;
+      }
+      match /recipes/{recipeId} {
+        allow read, write: if isSignedIn();
+      }
+
+      // --- المخزن التام (المنتجات الجاهزة للبيع) ---
+      match /finished_goods/{itemId} {
+        allow read, write: if isSignedIn();
+      }
+
+      // --- المالية والحسابات ---
+      // كل موظف مسجَّل دخوله يمكنه القراءة والإضافة (المصاريف/الإيرادات تُسجَّل
+      // تلقائياً من عدة تدفقات: تسليم طلب، شراء مخزون، بيع مباشر...). الحذف
+      // (تصحيح خطأ في قيد مالي) مقصور على مدير المصنع أو المدير العام فقط،
+      // مطابقةً لظهور هذا الزر في واجهة المالية لهاتين الرتبتين حصراً.
+      match /transactions/{transactionId} {
+        allow read, create, update: if isSignedIn();
+        allow delete: if isManagerOrAdmin();
+      }
+    }
+  }
+}

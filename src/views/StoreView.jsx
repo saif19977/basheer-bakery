@@ -27,7 +27,6 @@ export const StoreView = () => {
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingInvId, setEditingInvId] = useState(null);
   const [deleteInvModal, setDeleteInvModal] = useState(null);
-  const [logToFinance, setLogToFinance] = useState(true);
   const [form, setForm] = useState(EMPTY_INVENTORY_FORM);
   const submitLock = useSubmitLock();
 
@@ -66,9 +65,9 @@ export const StoreView = () => {
         return;
       }
 
-      const { merged, loggedToFinance } = await purchaseInventory({ form, inventory, logToFinance });
+      const { merged, loggedToFinance } = await purchaseInventory({ form, inventory });
       showNotification(merged ? `تم زيادة رصيد وتحديث متوسط التكلفة للمادة: ${form.itemName}` : 'تم إضافة المادة الجديدة للمستودع.');
-      if (loggedToFinance) showNotification('تم تسجيل عملية الشراء في السجل المالي تلقائياً.');
+      if (loggedToFinance) showNotification('تم تسجيل عملية الشراء في السجل المالي تلقائياً كمصروف.');
 
       setModalOpen(false);
       setForm(EMPTY_INVENTORY_FORM);
@@ -187,7 +186,6 @@ export const StoreView = () => {
       <InventoryFormModal
         isOpen={isModalOpen} onClose={() => { setModalOpen(false); setEditingInvId(null); }}
         editingInvId={editingInvId} form={form} setForm={setForm}
-        logToFinance={logToFinance} setLogToFinance={setLogToFinance}
         isProcessing={submitLock.isProcessing} onSubmit={handleInventorySubmit}
       />
 

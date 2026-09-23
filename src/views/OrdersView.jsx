@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Edit, Image as ImageIcon, Phone, Plus, Printer, Search, Trash2 } from 'lucide-react';
+import { Edit, Image as ImageIcon, MessageSquare, Phone, Plus, Printer, Search, Trash2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { Table } from '../components/ui/Table';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Countdown } from '../components/ui/Countdown';
+import { CustomerNotesModal } from '../components/CustomerNotesModal';
 import { OrderFormModal } from './orders/OrderFormModal';
 import { useOrderForm } from './orders/useOrderForm';
 import { useSubmitLock } from '../hooks/useSubmitLock';
 import { cancelOrder } from '../services/ordersService';
+import { customerIdFromPhone } from '../services/customersService';
 import { formatMoney, formatOrderNum, safeStr } from '../utils/format';
 import { getItemDisplayName, getOrderItems } from '../utils/orderItems';
 
@@ -57,6 +59,7 @@ export const OrdersView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('active');
   const [cancelModal, setCancelModal] = useState(null);
+  const [notesOrder, setNotesOrder] = useState(null);
 
   // نفس قفل الإرسال يُستخدم لحفظ الطلب ولإلغائه، تماماً كما في الأصل
   // (لا يمكن تنفيذ الاثنين في آنٍ واحد).
@@ -139,6 +142,7 @@ export const OrdersView = () => {
               <td className="p-4 flex gap-2">
                 <button onClick={() => setPrintData({ ...o, printType: 'invoice' })} className="text-gray-600 hover:text-gray-800 p-2 bg-gray-100 rounded-lg transition-colors" title="طباعة الفاتورة"><Printer size={18} /></button>
                 <button onClick={() => orderForm.openEditModal(o)} className="text-blue-600 hover:text-blue-800 p-2 bg-blue-50 rounded-lg transition-colors" title="تعديل"><Edit size={18} /></button>
+                <button onClick={() => setNotesOrder(o)} className="text-purple-600 hover:text-purple-800 p-2 bg-purple-50 rounded-lg transition-colors" title="سجل المحادثات والملاحظات"><MessageSquare size={18} /></button>
                 {o.status !== 'cancelled' && o.status !== 'completed' && (
                   <button onClick={() => setCancelModal(o)} className="text-red-600 hover:text-red-800 p-2 bg-red-50 rounded-lg transition-colors" title="إلغاء الطلب واسترجاع المخزون"><Trash2 size={18} /></button>
                 )}
@@ -176,6 +180,13 @@ export const OrdersView = () => {
         onRemoveItemImage={orderForm.removeItemImage}
         onZoomImage={setZoomedImage}
         onSubmit={orderForm.handleSubmit}
+      />
+
+      <CustomerNotesModal
+        isOpen={!!notesOrder} onClose={() => setNotesOrder(null)}
+        customerId={notesOrder ? customerIdFromPhone(notesOrder.phone) : null}
+        customerName={notesOrder?.customerName}
+        order={notesOrder}
       />
     </div>
   );

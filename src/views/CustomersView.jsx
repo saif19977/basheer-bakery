@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Phone, Search, Users } from 'lucide-react';
+import { MessageSquare, Phone, Search, Users } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { StatCard } from '../components/ui/StatCard';
 import { Table } from '../components/ui/Table';
+import { CustomerNotesModal } from '../components/CustomerNotesModal';
 import { formatDate, formatMoney, safeStr } from '../utils/format';
 import { PAYMENT_TYPE_BADGE_CLASS } from '../constants/paymentTypes';
 
 export const CustomersView = () => {
   const { customers } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
+  const [notesCustomer, setNotesCustomer] = useState(null);
 
   const sTerm = safeStr(searchTerm);
   const customersList = customers
@@ -26,7 +28,7 @@ export const CustomersView = () => {
         <StatCard title="إجمالي عدد العملاء" value={customers.length} icon={Users} colorClass="bg-blue-100 text-blue-600" />
       </div>
 
-      <Table headers={['اسم العميل', 'رقم الهاتف', 'التفضيلات', 'إجمالي الطلبات', 'إجمالي المدفوعات', 'آخر طلب', 'العنوان المعتاد']}>
+      <Table headers={['اسم العميل', 'رقم الهاتف', 'التفضيلات', 'إجمالي الطلبات', 'إجمالي المدفوعات', 'آخر طلب', 'العنوان المعتاد', 'سجل المحادثات']}>
         {customersList.map((c) => (
           <tr key={c.id} className="hover:bg-gray-50">
             <td className="p-4 font-bold text-gray-800">{c.name}</td>
@@ -43,10 +45,18 @@ export const CustomersView = () => {
             <td className="p-4 font-bold text-green-700">{formatMoney(c.totalSpent)} IQD</td>
             <td className="p-4 text-sm text-gray-500">{formatDate(c.lastOrderAt)}</td>
             <td className="p-4 text-sm text-gray-600 truncate max-w-[200px]" title={c.address}>{c.address}</td>
+            <td className="p-4">
+              <button onClick={() => setNotesCustomer(c)} className="text-blue-600 hover:text-blue-800 p-2 bg-blue-50 rounded-lg transition-colors" title="سجل المحادثات والملاحظات"><MessageSquare size={18} /></button>
+            </td>
           </tr>
         ))}
-        {customersList.length === 0 && <tr><td colSpan="7" className="p-6 text-center text-gray-400">لا توجد بيانات عملاء.</td></tr>}
+        {customersList.length === 0 && <tr><td colSpan="8" className="p-6 text-center text-gray-400">لا توجد بيانات عملاء.</td></tr>}
       </Table>
+
+      <CustomerNotesModal
+        isOpen={!!notesCustomer} onClose={() => setNotesCustomer(null)}
+        customerId={notesCustomer?.id} customerName={notesCustomer?.name}
+      />
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, deleteDoc, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { dataCollection, dataDoc } from '../firebase/paths';
 
 // يعدّل بيانات مادة موجودة (تعديل مباشر، بلا دمج أو سجل حركة).
@@ -13,13 +13,17 @@ export async function deleteInventoryItem(id) {
   await deleteDoc(dataDoc('inventory', id));
 }
 
-// إدخال مخزني جديد: يدمج مع المادة الموجودة بنفس الاسم/الفئة محتسباً متوسط
-// التكلفة المرجّح، أو ينشئ مادة جديدة إن لم توجد. يسجّل مستند إدخال دائماً،
-// وحركة مصروف مالي اختيارية عند طلب ذلك.
-export async function purchaseInventory({ form, inventory, logToFinance }) {
+// إدخال مخزني جديد (شراء): يدمج مع المادة الموجودة بنفس الاسم/الفئة محتسباً
+// متوسط التكلفة المرجّح، أو ينشئ مادة جديدة إن لم توجد. مزامنة ثلاثية تلقائية
+// بلا أي إدخال يدوي مزدوج: (١) تحديث رصيد/تكلفة المخزون، (٢) تسجيل حركة
+// إدخال في سجل المخازن، (٣) تسجيل نفس القيمة كمصروف في السجل المالي —
+// مع ربط كل من حركة المخزون والقيد المالي بمعرّف الآخر (relatedTransactionId
+// / relatedInventoryLogId) لتتبّع كامل بلا حاجة لخانة "تسجيل يدوي" بعد الآن.
+export async function purchaseInventory({ form, inventory }) {
   const now = new Date().toISOString();
   const newQty = Number(form.quantity);
   const newPrice = Number(form.price) || 0;
+  const totalCost = newQty * newPrice;
 
   const existing = inventory.find(i => i.itemName === form.itemName && i.type === form.type);
   let finalInvId;
@@ -39,18 +43,24 @@ export async function purchaseInventory({ form, inventory, logToFinance }) {
     finalInvId = docRef.id;
   }
 
-  await addDoc(dataCollection('inventory_logs'), {
+  // معرّفا المستندين يُولَّدان مسبقاً (بلا كتابة فعلية بعد) حتى يحمل كل منهما
+  // إشارة الآخر منذ لحظة إنشائه — بلا أي update لاحق على inventory_logs (سجل
+  // حركات يُنشأ فقط ولا يُعدَّل أبداً بعد كتابته، تماماً كسجل محاسبي).
+  const logRef = doc(dataCollection('inventory_logs'));
+  const loggedToFinance = totalCost > 0;
+  const transactionRef = loggedToFinance ? doc(dataCollection('transactions')) : null;
+
+  await setDoc(logRef, {
     date: now, type: 'IN', inventoryId: finalInvId, itemName: form.itemName, qty: newQty, price: newPrice,
-    supplier: form.supplier || '-', invoiceNum: form.invoiceNum || '-', notes: 'إدخال مخزني جديد',
+    supplier: form.supplier || '-', invoiceNum: form.invoiceNum || '-', notes: 'إدخال مخزني جديد (شراء)',
+    relatedTransactionId: transactionRef ? transactionRef.id : null,
   });
 
-  const loggedToFinance = logToFinance && newPrice > 0;
-  if (loggedToFinance) {
-    const totalCost = newQty * newPrice;
-    await addDoc(dataCollection('transactions'), {
+  if (transactionRef) {
+    await setDoc(transactionRef, {
       category: 'inventory_purchase', type: 'expense', amount: totalCost,
       description: `شراء مواد: ${newQty} ${form.unit} من ${form.itemName} ${form.supplier ? '(المورد: ' + form.supplier + ')' : ''}`,
-      date: now,
+      date: now, relatedInventoryLogId: logRef.id,
     });
   }
 

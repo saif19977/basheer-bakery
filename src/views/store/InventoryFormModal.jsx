@@ -1,7 +1,7 @@
 import { Modal } from '../../components/ui/Modal';
 
 export const InventoryFormModal = ({
-  isOpen, onClose, editingInvId, form, setForm, logToFinance, setLogToFinance, isProcessing, onSubmit,
+  isOpen, onClose, editingInvId, form, setForm, isProcessing, onSubmit,
 }) => (
   <Modal isOpen={isOpen} onClose={onClose} title={editingInvId ? 'تعديل بيانات المادة' : 'مستند إدخال مخزني'}>
     <form onSubmit={onSubmit} className="space-y-4">
@@ -29,9 +29,8 @@ export const InventoryFormModal = ({
             <div><label className="block text-sm font-medium text-gray-700 mb-1">الشركة الموردة (اختياري)</label><input type="text" value={form.supplier} onChange={e => setForm({ ...form, supplier: e.target.value })} className="w-full p-2.5 border rounded-lg outline-none" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">رقم فاتورة الشراء (اختياري)</label><input type="text" value={form.invoiceNum} onChange={e => setForm({ ...form, invoiceNum: e.target.value })} className="w-full p-2.5 border rounded-lg outline-none font-mono" /></div>
           </div>
-          <div className="bg-gray-50 p-3 rounded-lg border flex items-center gap-3">
-            <input type="checkbox" id="logToFinance" checked={logToFinance} onChange={e => setLogToFinance(e.target.checked)} className="w-5 h-5 text-amber-600 rounded focus:ring-amber-500 cursor-pointer" />
-            <label htmlFor="logToFinance" className="text-sm font-bold text-gray-700 cursor-pointer">تسجيل القيمة الإجمالية كمصروف في سجل المالية تلقائياً</label>
+          <div className="bg-green-50 p-3 rounded-lg border border-green-100 text-xs text-green-800 font-bold">
+            سيتم تلقائياً: تحديث رصيد المخزن، تسجيل مستند الإدخال، وتسجيل القيمة الإجمالية كمصروف في السجل المالي — بلا حاجة لأي إدخال يدوي إضافي.
           </div>
         </>
       )}
