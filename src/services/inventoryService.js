@@ -1,4 +1,5 @@
-import { addDoc, deleteDoc, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, addDoc, deleteDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import { dataCollection, dataDoc } from '../firebase/paths';
 
 // يعدّل بيانات مادة موجودة (تعديل مباشر، بلا دمج أو سجل حركة).
@@ -13,58 +14,89 @@ export async function deleteInventoryItem(id) {
   await deleteDoc(dataDoc('inventory', id));
 }
 
-// إدخال مخزني جديد (شراء): يدمج مع المادة الموجودة بنفس الاسم/الفئة محتسباً
-// متوسط التكلفة المرجّح، أو ينشئ مادة جديدة إن لم توجد. مزامنة ثلاثية تلقائية
-// بلا أي إدخال يدوي مزدوج: (١) تحديث رصيد/تكلفة المخزون، (٢) تسجيل حركة
-// إدخال في سجل المخازن، (٣) تسجيل نفس القيمة كمصروف في السجل المالي —
-// مع ربط كل من حركة المخزون والقيد المالي بمعرّف الآخر (relatedTransactionId
-// / relatedInventoryLogId) لتتبّع كامل بلا حاجة لخانة "تسجيل يدوي" بعد الآن.
-export async function purchaseInventory({ form, inventory }) {
+// معادلة متوسط التكلفة المرجّح — مصدر وحيد يُعاد استخدامه لكل سطر شراء (سواء
+// مادة موجودة مسبقاً أو جديدة تماماً). لمادة جديدة تُمرَّر {quantity:0, price:0}
+// كرصيد سابق، وهو ما يُنتج بالضبط quantity=newQty, price=newPrice رياضياً —
+// فلا حاجة لمسار منفصل لحالة "مادة جديدة".
+function computeWeightedAverage({ quantity: oldQty, price: oldPrice }, newQty, newPrice) {
+  const oldTotal = oldQty * oldPrice;
+  const newTotal = newQty * newPrice;
+  return { quantity: oldQty + newQty, price: (oldTotal + newTotal) / (oldQty + newQty) };
+}
+
+// فاتورة شراء واحدة قد تضم عدة أصناف (مورّد ورقم فاتورة موحّدان للفاتورة
+// كاملة)، تُنفَّذ كعملية batch واحدة ذرّية: كل سطر يُحدّث/يُنشئ مستند مخزونه
+// بمتوسط التكلفة المرجّح ويترك حركة دخول خاصة به، بينما تُسجَّل الفاتورة
+// بأكملها كقيد مصروف واحد بالإجمالي الكلي — بلا أي قراءة إضافية من Firestore
+// (الحساب كله من لقطة inventory المُمرَّرة + الأسطر نفسها).
+//
+// تكرار نفس الصنف في أكثر من سطر ضمن نفس الفاتورة (أو تكرار اسم صنف جديد لم
+// يكن موجوداً) يُدمَج بشكل صحيح ومتسلسل عبر itemState بدل الاعتماد فقط على
+// اللقطة الثابتة قبل هذا الإرسال، حتى لا يُفقَد أثر سطر سابق لنفس المادة.
+export async function purchaseInventoryBatch({ items, supplier, invoiceNum, inventory }) {
   const now = new Date().toISOString();
-  const newQty = Number(form.quantity);
-  const newPrice = Number(form.price) || 0;
-  const totalCost = newQty * newPrice;
+  const batch = writeBatch(db);
 
-  const existing = inventory.find(i => i.itemName === form.itemName && i.type === form.type);
-  let finalInvId;
-
-  if (existing) {
-    const oldTotal = existing.quantity * existing.price;
-    const newTotal = newQty * newPrice;
-    const avgPrice = (oldTotal + newTotal) / (existing.quantity + newQty);
-    await updateDoc(dataDoc('inventory', existing.id), {
-      quantity: existing.quantity + newQty, price: avgPrice, lastUpdated: now,
-    });
-    finalInvId = existing.id;
-  } else {
-    const docRef = await addDoc(dataCollection('inventory'), {
-      itemName: form.itemName, type: form.type, unit: form.unit, quantity: newQty, price: newPrice, lastUpdated: now,
-    });
-    finalInvId = docRef.id;
-  }
-
-  // معرّفا المستندين يُولَّدان مسبقاً (بلا كتابة فعلية بعد) حتى يحمل كل منهما
-  // إشارة الآخر منذ لحظة إنشائه — بلا أي update لاحق على inventory_logs (سجل
-  // حركات يُنشأ فقط ولا يُعدَّل أبداً بعد كتابته، تماماً كسجل محاسبي).
-  const logRef = doc(dataCollection('inventory_logs'));
-  const loggedToFinance = totalCost > 0;
+  const grandTotal = items.reduce((sum, item) => sum + Number(item.quantity) * (Number(item.price) || 0), 0);
+  const loggedToFinance = grandTotal > 0;
   const transactionRef = loggedToFinance ? doc(dataCollection('transactions')) : null;
 
-  await setDoc(logRef, {
-    date: now, type: 'IN', inventoryId: finalInvId, itemName: form.itemName, qty: newQty, price: newPrice,
-    supplier: form.supplier || '-', invoiceNum: form.invoiceNum || '-', notes: 'إدخال مخزني جديد (شراء)',
-    relatedTransactionId: transactionRef ? transactionRef.id : null,
-  });
+  const itemState = new Map(); // key: معرّف مخزون موجود، أو `new:اسم|فئة` لمادة جديدة ضمن هذه الفاتورة
+  const logRefs = [];
+
+  for (const item of items) {
+    const newQty = Number(item.quantity);
+    const newPrice = Number(item.price) || 0;
+
+    const existing = item.inventoryId
+      ? inventory.find(i => i.id === item.inventoryId)
+      : inventory.find(i => i.itemName === item.itemName && i.type === item.type);
+    const stateKey = existing ? existing.id : `new:${item.itemName}|${item.type}`;
+
+    let state = itemState.get(stateKey);
+    if (!state) {
+      state = existing
+        ? { ref: dataDoc('inventory', existing.id), isNew: false, quantity: existing.quantity, price: existing.price }
+        : { ref: doc(dataCollection('inventory')), isNew: true, quantity: 0, price: 0 };
+      itemState.set(stateKey, state);
+    }
+
+    const updated = computeWeightedAverage({ quantity: state.quantity, price: state.price }, newQty, newPrice);
+    state.quantity = updated.quantity;
+    state.price = updated.price;
+    state.itemName = item.itemName;
+    state.type = item.type;
+    state.unit = item.unit;
+
+    const logRef = doc(dataCollection('inventory_logs'));
+    batch.set(logRef, {
+      date: now, type: 'IN', inventoryId: state.ref.id, itemName: item.itemName, qty: newQty, price: newPrice,
+      supplier: supplier || '-', invoiceNum: invoiceNum || '-', notes: 'إدخال مخزني ضمن فاتورة شراء متعددة الأصناف',
+      relatedTransactionId: transactionRef ? transactionRef.id : null,
+    });
+    logRefs.push(logRef.id);
+  }
+
+  let mergedCount = 0;
+  for (const state of itemState.values()) {
+    if (state.isNew) {
+      batch.set(state.ref, { itemName: state.itemName, type: state.type, unit: state.unit, quantity: state.quantity, price: state.price, lastUpdated: now });
+    } else {
+      batch.update(state.ref, { quantity: state.quantity, price: state.price, lastUpdated: now });
+      mergedCount += 1;
+    }
+  }
 
   if (transactionRef) {
-    await setDoc(transactionRef, {
-      category: 'inventory_purchase', type: 'expense', amount: totalCost,
-      description: `شراء مواد: ${newQty} ${form.unit} من ${form.itemName} ${form.supplier ? '(المورد: ' + form.supplier + ')' : ''}`,
-      date: now, relatedInventoryLogId: logRef.id,
+    batch.set(transactionRef, {
+      category: 'inventory_purchase', type: 'expense', amount: grandTotal,
+      description: `فاتورة شراء مواد (${items.length} صنف)${supplier ? ' - المورد: ' + supplier : ''}${invoiceNum ? ' - فاتورة #' + invoiceNum : ''}`,
+      date: now, relatedInventoryLogIds: logRefs,
     });
   }
 
-  return { merged: !!existing, loggedToFinance };
+  await batch.commit();
+  return { grandTotal, itemCount: items.length, distinctItemCount: itemState.size, mergedCount, loggedToFinance };
 }
 
 // تعديل جرد سريع (+ / -) من جدول الأرصدة، مع تسجيل حركة الجرد.

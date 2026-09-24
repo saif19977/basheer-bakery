@@ -5,10 +5,12 @@ import { InventoryTab } from './store/InventoryTab';
 import { LogsTab } from './store/LogsTab';
 import { RecipesTab } from './store/RecipesTab';
 import { InventoryFormModal } from './store/InventoryFormModal';
+import { PurchaseInvoiceModal } from './store/PurchaseInvoiceModal';
 import { RecipeFormModal } from './store/RecipeFormModal';
 import { useSubmitLock } from '../hooks/useSubmitLock';
 import { useInventoryLogs } from '../hooks/useInventoryLogs';
-import { adjustInventoryQuantity, deleteInventoryItem, purchaseInventory, updateInventoryItem } from '../services/inventoryService';
+import { usePurchaseInvoiceForm } from './store/usePurchaseInvoiceForm';
+import { adjustInventoryQuantity, deleteInventoryItem, updateInventoryItem } from '../services/inventoryService';
 import { deleteRecipe, saveRecipe as saveRecipeService } from '../services/recipesService';
 
 const EMPTY_INVENTORY_FORM = { itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' };
@@ -31,18 +33,16 @@ export const StoreView = () => {
   const [deleteInvModal, setDeleteInvModal] = useState(null);
   const [form, setForm] = useState(EMPTY_INVENTORY_FORM);
   const submitLock = useSubmitLock();
+  // قفل منفصل عن submitLock الخاص بتعديل/حذف مادة أو معادلة — فاتورة الشراء
+  // نافذة مستقلة تماماً ولا ينبغي أن تتشارك حالة "جارٍ الحفظ" مع الأخرى.
+  const purchaseSubmitLock = useSubmitLock();
+  const purchaseInvoiceForm = usePurchaseInvoiceForm({ inventory, showNotification, submitLock: purchaseSubmitLock });
 
   const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
   const [deleteRecipeModal, setDeleteRecipeModal] = useState(null);
   const [recipeForm, setRecipeForm] = useState(EMPTY_RECIPE_FORM);
   const [selectedMat, setSelectedMat] = useState('');
   const [selectedMatQty, setSelectedMatQty] = useState('');
-
-  const openNewInventoryModal = () => {
-    setEditingInvId(null);
-    setForm(EMPTY_INVENTORY_FORM);
-    setModalOpen(true);
-  };
 
   const handleEditInventory = (item) => {
     setEditingInvId(item.id);
@@ -53,24 +53,17 @@ export const StoreView = () => {
     setModalOpen(true);
   };
 
+  // هذا النموذج أصبح مخصَّصاً فقط لتعديل بيانات مادة موجودة مباشرة (تعديل
+  // مباشر بلا دمج أو سجل حركة) — إدخال مشتريات جديدة صار حصراً عبر فاتورة
+  // الشراء متعددة الأصناف (purchaseInvoiceForm) أدناه.
   const handleInventorySubmit = async (e) => {
     e.preventDefault();
     if (submitLock.isLocked()) return;
     submitLock.lock();
     try {
-      if (editingInvId) {
-        await updateInventoryItem(editingInvId, form);
-        showNotification('تم تعديل بيانات المادة بنجاح.');
-        setEditingInvId(null);
-        setModalOpen(false);
-        setForm(EMPTY_INVENTORY_FORM);
-        return;
-      }
-
-      const { merged, loggedToFinance } = await purchaseInventory({ form, inventory });
-      showNotification(merged ? `تم زيادة رصيد وتحديث متوسط التكلفة للمادة: ${form.itemName}` : 'تم إضافة المادة الجديدة للمستودع.');
-      if (loggedToFinance) showNotification('تم تسجيل عملية الشراء في السجل المالي تلقائياً كمصروف.');
-
+      await updateInventoryItem(editingInvId, form);
+      showNotification('تم تعديل بيانات المادة بنجاح.');
+      setEditingInvId(null);
       setModalOpen(false);
       setForm(EMPTY_INVENTORY_FORM);
     } finally {
@@ -176,7 +169,7 @@ export const StoreView = () => {
       </div>
 
       {subTab === 'inventory' && (
-        <InventoryTab inventory={inventory} user={user} onOpenNew={openNewInventoryModal} onEdit={handleEditInventory} onDelete={setDeleteInvModal} onAdjustQty={handleAdjustQty} />
+        <InventoryTab inventory={inventory} user={user} onOpenNew={purchaseInvoiceForm.openModal} onEdit={handleEditInventory} onDelete={setDeleteInvModal} onAdjustQty={handleAdjustQty} />
       )}
 
       {subTab === 'logs' && (
@@ -195,6 +188,15 @@ export const StoreView = () => {
         isOpen={isModalOpen} onClose={() => { setModalOpen(false); setEditingInvId(null); }}
         editingInvId={editingInvId} form={form} setForm={setForm}
         isProcessing={submitLock.isProcessing} onSubmit={handleInventorySubmit}
+      />
+
+      <PurchaseInvoiceModal
+        isOpen={purchaseInvoiceForm.isModalOpen} onClose={purchaseInvoiceForm.closeModal}
+        inventory={inventory} form={purchaseInvoiceForm.form} grandTotal={purchaseInvoiceForm.grandTotal}
+        isProcessing={purchaseInvoiceForm.isProcessing}
+        onFieldChange={purchaseInvoiceForm.handleFieldChange} onItemChange={purchaseInvoiceForm.handleItemChange}
+        onAddItem={purchaseInvoiceForm.addItem} onRemoveItem={purchaseInvoiceForm.removeItem}
+        onSubmit={purchaseInvoiceForm.handleSubmit}
       />
 
       <ConfirmModal
