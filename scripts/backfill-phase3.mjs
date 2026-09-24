@@ -29,6 +29,18 @@
  *     has room) to continue from where it left off, until it reports
  *     "COMPLETE — no more orders to process".
  *
+ *     `--batch-size` only controls how many order DOCUMENTS are read per
+ *     Firestore query (a read-quota knob — raise it freely to move faster,
+ *     it has no Firestore-imposed ceiling). Writing is a separate concern:
+ *     each fetched page is internally re-sliced into write-chunks of at most
+ *     WRITE_CHUNK_ORDERS orders (worst case 2 writes per order — one order
+ *     update, one customer merge — so this is sized to stay comfortably
+ *     under Firestore's hard 500-writes-per-batch limit regardless of how
+ *     large `--batch-size` is set). The cursor advances and is saved after
+ *     EVERY write-chunk commit, not just once per page, so a large
+ *     `--batch-size` is now always safe: you'll just see several small
+ *     commits logged per run instead of one giant one.
+ *
  * Why the customer-directory step needs no reads: because batches are always
  * processed in strict createdAt-ascending order (oldest-first, tracked by
  * the cursor), any batch is guaranteed to be chronologically newer than
@@ -57,14 +69,16 @@
  *   1. node scripts/backfill-phase3.mjs --fix-counter --execute   (once, immediately)
  *   2. node scripts/backfill-phase3.mjs --execute                 (repeat once/day until it reports COMPLETE)
  *
- * Safe to re-run / resume: the cursor is only advanced after a batch's
- * Firestore commit succeeds, so a crashed or interrupted run can simply be
- * re-run — it will re-fetch the same (still-unprocessed) batch. All writes
- * in a batch are atomic/idempotent (increment, arrayUnion, plain field sets,
- * and a `>=`-only counter raise), so even the rare case of the same batch
- * being committed twice back-to-back only double-counts that one batch,
- * never corrupts state permanently — if you ever suspect that happened,
- * see "Recovering from a bad run" below.
+ * Safe to re-run / resume: the cursor is only advanced after a write-chunk's
+ * Firestore commit succeeds (see WRITE_CHUNK_ORDERS below — a page fetched
+ * via --batch-size may be split into several such chunks), so a crashed or
+ * interrupted run can simply be re-run — it will re-fetch starting right
+ * after the last chunk that actually committed. All writes are
+ * atomic/idempotent (increment, arrayUnion, plain field sets, and a
+ * `>=`-only counter raise), so even the rare case of one chunk being
+ * committed twice back-to-back only double-counts that one chunk (at most
+ * WRITE_CHUNK_ORDERS orders), never corrupts state permanently — if you
+ * ever suspect that happened, see "Recovering from a bad run" below.
  *
  * Recovering from a bad run: delete every doc in the `customers` collection,
  * `--reset-cursor`, and start the chunked scan over from the beginning. The
@@ -85,6 +99,14 @@ const PROJECT_ID = 'cakeshop-88377'; // نفس firebaseConfig.projectId في src
 const NO_PHONE_CUSTOMER_ID = 'NO_PHONE';
 const DEFAULT_BATCH_SIZE = 200;
 const DEFAULT_MAX_BATCHES = 1; // "توقف تلقائياً بعد دفعة أو دفعتين" — الافتراضي الأكثر أماناً هو دفعة واحدة.
+
+// ثابت أمان داخلي (غير قابل للتهيئة عبر CLI عمداً) — منفصل تماماً عن
+// --batch-size. كل طلب يمكن أن يولّد كتابتين على الأكثر (تحديث الطلب نفسه +
+// دمج بيانات عميله)، فحجم 200 طلب لكل دفعة كتابة يعني 400 كتابة كحد أقصى —
+// أقل بأمان من حد فايربيس الصارم البالغ 500 كتابة لكل batch واحد. هذا بالضبط
+// ما تسبّب بخطأ "Transaction too big" سابقاً: --batch-size كان يتحكم بحجم
+// القراءة والكتابة معاً في نفس الوقت دون فصل بينهما.
+const WRITE_CHUNK_ORDERS = 200;
 
 const PAYMENT_TYPE_CASH = 'نقد';
 const PAYMENT_TYPE_CREDIT = 'آجل';
@@ -150,6 +172,82 @@ function dataPath(db, collectionName) {
   return db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection(collectionName);
 }
 
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) chunks.push(array.slice(i, i + size));
+  return chunks;
+}
+
+// يبني دلتا العملاء + كتابات paidAmount/remainingDebt لمجموعة طلبات واحدة
+// فقط (شريحة كتابة واحدة، ≤ WRITE_CHUNK_ORDERS)، ثم يُنفّذها في batch واحد
+// آمن الحجم دائماً (انظر تعليق WRITE_CHUNK_ORDERS أعلاه). هذا يقابل بالضبط
+// commitInBatches في النسخة القديمة من السكربت، لكنه يعمل على مستوى كل
+// شريحة كتابة بدل الصفحة كاملة، حتى تبقى الكتابة آمنة بصرف النظر عن حجم
+// --batch-size (وهو الآن مسؤول فقط عن القراءة).
+async function commitOrderChunk(db, orders, { execute }) {
+  const customerDeltas = new Map();
+  const paymentSplitWrites = [];
+
+  for (const order of orders) {
+    if (order.paidAmount === undefined || order.remainingDebt === undefined) {
+      const { paidAmount, remainingDebt } = computePaymentSplit({
+        paymentType: order.paymentType || PAYMENT_TYPE_CASH,
+        totalPrice: order.price,
+        paidAmount: order.paidAmount,
+      });
+      paymentSplitWrites.push({ ref: order.ref, data: { paidAmount, remainingDebt } });
+    }
+
+    if (!order.phone && !order.customerName) continue;
+    const custId = customerIdFromPhone(order.phone);
+    const delta = customerDeltas.get(custId) || {
+      orderCountDelta: 0, totalSpentDelta: 0,
+      methodsToAdd: new Set(), paymentTypesToAdd: new Set(),
+      latestCreatedAt: null, latestName: '', latestAddress: '', latestPhone: order.phone || '-',
+    };
+
+    if (order.status !== 'cancelled') delta.orderCountDelta += 1;
+    if (order.status === 'completed') delta.totalSpentDelta += Number(order.price) || 0;
+    if (order.contactMethod) delta.methodsToAdd.add(order.contactMethod);
+    if (order.paymentType) delta.paymentTypesToAdd.add(order.paymentType);
+
+    // هذه الشريحة أحدث زمنياً دائماً من كل ما سبق معالجته (بسبب ترتيب
+    // المؤشر التصاعدي بـ createdAt)، لذا آخر طلب ضمنها لعميل ما يكفي وحده
+    // لتحديث بيانات التواصل بأمان بلا أي قراءة مسبقة للمستند.
+    if (!delta.latestCreatedAt || new Date(order.createdAt || 0) >= new Date(delta.latestCreatedAt)) {
+      delta.latestCreatedAt = order.createdAt || delta.latestCreatedAt;
+      delta.latestName = order.customerName || delta.latestName;
+      delta.latestAddress = order.address || delta.latestAddress;
+      delta.latestPhone = order.phone || delta.latestPhone;
+    }
+
+    customerDeltas.set(custId, delta);
+  }
+
+  const totalWrites = paymentSplitWrites.length + customerDeltas.size;
+  console.log(`    ${orders.length} طلباً → ${paymentSplitWrites.length} تحديث دفع + ${customerDeltas.size} دمج عميل = ${totalWrites} كتابة${execute ? '' : ' (dry-run)'}`);
+
+  if (execute) {
+    const batch = db.batch();
+    for (const w of paymentSplitWrites) batch.update(w.ref, w.data);
+    for (const [custId, delta] of customerDeltas.entries()) {
+      const custRef = dataPath(db, 'customers').doc(custId);
+      const payload = {
+        phone: delta.latestPhone, name: delta.latestName, address: delta.latestAddress,
+        lastOrderAt: delta.latestCreatedAt,
+        orderCount: FieldValue.increment(delta.orderCountDelta),
+        totalSpent: FieldValue.increment(delta.totalSpentDelta),
+      };
+      if (delta.methodsToAdd.size > 0) payload.methods = FieldValue.arrayUnion(...delta.methodsToAdd);
+      if (delta.paymentTypesToAdd.size > 0) payload.paymentTypes = FieldValue.arrayUnion(...delta.paymentTypesToAdd);
+      batch.set(custRef, payload, { merge: true });
+    }
+    await batch.commit();
+  }
+
+  return { customersTouched: customerDeltas.size };
+}
+
 // --- MODE: --fix-counter — إصلاح فوري ورخيص (استعلامان فقط، بلا مسح للمجموعة) ---
 async function runFixCounter(db, { execute }) {
   console.log('=== إصلاح عداد أرقام الطلبات (--fix-counter) ===\n');
@@ -210,80 +308,28 @@ async function runBatch(db, { execute, batchSize, maxBatches, cursorPath }) {
     const orders = snap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }));
     console.log(`[دفعة ${batchNum}/${maxBatches}] تم جلب ${orders.length} طلباً (${orders.length} قراءة).`);
 
-    // --- تجميع دلتا كل عميل ضمن هذه الدفعة فقط (بلا أي قراءة إضافية) ---
-    const customerDeltas = new Map();
-    const paymentSplitWrites = [];
+    // كل صفحة مقروءة (قد تكون كبيرة إن رفع المستخدم --batch-size) تُقسَّم هنا
+    // إلى شرائح كتابة آمنة الحجم — انظر تعليق WRITE_CHUNK_ORDERS. المؤشر
+    // يتقدّم ويُحفظ بعد كل شريحة على حدة، وليس بعد الصفحة كاملة، حتى لا
+    // يُعاد تنفيذ كتابات نجحت فعلاً لو تعطّل السكربت منتصف صفحة كبيرة.
+    const writeChunks = chunkArray(orders, WRITE_CHUNK_ORDERS);
+    for (const chunk of writeChunks) {
+      const { customersTouched } = await commitOrderChunk(db, chunk, { execute });
 
-    for (const order of orders) {
-      if (order.paidAmount === undefined || order.remainingDebt === undefined) {
-        const { paidAmount, remainingDebt } = computePaymentSplit({
-          paymentType: order.paymentType || PAYMENT_TYPE_CASH,
-          totalPrice: order.price,
-          paidAmount: order.paidAmount,
-        });
-        paymentSplitWrites.push({ ref: order.ref, data: { paidAmount, remainingDebt } });
-      }
+      const lastOrder = chunk[chunk.length - 1];
+      cursor.lastProcessedCreatedAt = lastOrder.createdAt;
+      cursor.lastProcessedOrderId = lastOrder.id;
+      cursor.ordersProcessed += chunk.length;
+      cursor.customersTouched += customersTouched;
 
-      if (!order.phone && !order.customerName) continue;
-      const custId = customerIdFromPhone(order.phone);
-      const delta = customerDeltas.get(custId) || {
-        orderCountDelta: 0, totalSpentDelta: 0,
-        methodsToAdd: new Set(), paymentTypesToAdd: new Set(),
-        latestCreatedAt: null, latestName: '', latestAddress: '', latestPhone: order.phone || '-',
-      };
-
-      if (order.status !== 'cancelled') delta.orderCountDelta += 1;
-      if (order.status === 'completed') delta.totalSpentDelta += Number(order.price) || 0;
-      if (order.contactMethod) delta.methodsToAdd.add(order.contactMethod);
-      if (order.paymentType) delta.paymentTypesToAdd.add(order.paymentType);
-
-      // الدفعة الحالية أحدث زمنياً دائماً من كل ما سبق معالجته (بسبب ترتيب
-      // المؤشر التصاعدي بـ createdAt)، لذا آخر طلب ضمن هذه الدفعة لعميل ما
-      // يكفي وحده لتحديث بيانات التواصل بأمان بلا أي قراءة مسبقة للمستند.
-      if (!delta.latestCreatedAt || new Date(order.createdAt || 0) >= new Date(delta.latestCreatedAt)) {
-        delta.latestCreatedAt = order.createdAt || delta.latestCreatedAt;
-        delta.latestName = order.customerName || delta.latestName;
-        delta.latestAddress = order.address || delta.latestAddress;
-        delta.latestPhone = order.phone || delta.latestPhone;
-      }
-
-      customerDeltas.set(custId, delta);
+      // المؤشر يُحفَظ فقط بعد نجاح الكتابة (أو فوراً في dry-run بلا كتابة
+      // فعلية حتى يعكس ملف الحالة تقدّم الفحص أيضاً) — راجع "Safe to
+      // re-run" أعلاه.
+      saveCursor(cursorPath, cursor);
     }
-
-    console.log(`  ${paymentSplitWrites.length} طلباً يحتاج تعبئة paidAmount/remainingDebt.`);
-    console.log(`  ${customerDeltas.size} عميلاً سيُحدَّث تراكمياً (increment/arrayUnion، بلا قراءات إضافية).`);
-
-    if (execute) {
-      const batch = db.batch();
-      for (const w of paymentSplitWrites) batch.update(w.ref, w.data);
-      for (const [custId, delta] of customerDeltas.entries()) {
-        const custRef = dataPath(db, 'customers').doc(custId);
-        const payload = {
-          phone: delta.latestPhone, name: delta.latestName, address: delta.latestAddress,
-          lastOrderAt: delta.latestCreatedAt,
-          orderCount: FieldValue.increment(delta.orderCountDelta),
-          totalSpent: FieldValue.increment(delta.totalSpentDelta),
-        };
-        if (delta.methodsToAdd.size > 0) payload.methods = FieldValue.arrayUnion(...delta.methodsToAdd);
-        if (delta.paymentTypesToAdd.size > 0) payload.paymentTypes = FieldValue.arrayUnion(...delta.paymentTypesToAdd);
-        batch.set(custRef, payload, { merge: true });
-      }
-      await batch.commit();
-      console.log('  ✓ تم تنفيذ الكتابة لهذه الدفعة.');
-    } else {
-      console.log('  (dry-run — لم تُنفَّذ أي كتابة)');
-    }
-
-    const lastOrder = orders[orders.length - 1];
-    cursor.lastProcessedCreatedAt = lastOrder.createdAt;
-    cursor.lastProcessedOrderId = lastOrder.id;
-    cursor.ordersProcessed += orders.length;
-    cursor.customersTouched += customerDeltas.size;
     cursor.batchesCompleted += 1;
-
-    // المؤشر يُحفَظ فقط بعد نجاح الكتابة (أو فوراً في dry-run بلا كتابة فعلية
-    // حتى يعكس ملف الحالة تقدّم الفحص أيضاً) — راجع "Safe to re-run" أعلاه.
     saveCursor(cursorPath, cursor);
+    console.log(`  ✓ تم تنفيذ ${writeChunks.length} شريحة كتابة لهذه الدفعة${execute ? '' : ' (dry-run — لم تُنفَّذ أي كتابة فعلية)'}.`);
 
     if (orders.length < batchSize) {
       cursor.completed = true;
