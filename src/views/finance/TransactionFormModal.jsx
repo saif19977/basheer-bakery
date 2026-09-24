@@ -1,6 +1,13 @@
 import { Modal } from '../../components/ui/Modal';
 import { EXPENSE_CATEGORIES } from '../../constants/financeCategories';
 
+// "مشتريات مخزون" مستبعدة عمداً من هذه القائمة: شراء مواد خام له الآن مساره
+// المخصّص ("تسجيل شراء مخزون" في شاشة المالية، بنفس مستند الإدخال المخزني)
+// الذي يزامن المخزون والتكلفة والمصروف معاً تلقائياً. إتاحتها هنا أيضاً كانت
+// تسمح بتسجيل مصروف "شراء" دون أي تحديث فعلي للمخزون — إدخال مزدوج يدوي
+// يتعارض مع الهدف من تلك المزامنة.
+const MANUAL_ENTRY_EXPENSE_CATEGORIES = Object.entries(EXPENSE_CATEGORIES).filter(([key]) => key !== 'inventory_purchase');
+
 export const TransactionFormModal = ({ isOpen, onClose, form, setForm, isProcessing, onSubmit }) => (
   <Modal isOpen={isOpen} onClose={onClose} title="تسجيل معاملة مالية يدوية">
     <form onSubmit={onSubmit} className="space-y-4">
@@ -21,7 +28,7 @@ export const TransactionFormModal = ({ isOpen, onClose, form, setForm, isProcess
                 <option value="other_income">إيرادات أخرى</option>
               </>
             ) : (
-              Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)
+              MANUAL_ENTRY_EXPENSE_CATEGORIES.map(([k, v]) => <option key={k} value={k}>{v}</option>)
             )}
           </select>
         </div>
