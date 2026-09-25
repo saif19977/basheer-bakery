@@ -98,6 +98,12 @@ export const FinanceView = () => {
     purchaseInvoiceForm.openModal();
   };
 
+  // alreadyRecorded لم يعد يعني "لا شيء تغيّر" — buildIdempotentRevenue يُحدّث
+  // حالة الطلب دائماً الآن حتى لو كان قيده المالي مسجَّلاً مسبقاً (طلب قديم من
+  // الزحف التاريخي مثلاً)، فيختفي من قائمة الانتظار في الحالتين. لذا لا داعي
+  // لإنهاء الإجراء مبكراً هنا، فقط تختلف رسالة الإشعار. release(order.id)
+  // مُضافة احتياطاً (دفاع إضافي) في حال تأخّر تحديث القائمة اللحظي لأي سبب،
+  // حتى لا يبقى الزر معطَّلاً بصرياً بعد أن أُنجز الإجراء فعلياً.
   const confirmDriverCash = async (order) => {
     if (actionLock.isLocked(order.id)) return;
     if (order.cashStatus === 'received_by_finance') {
@@ -107,11 +113,10 @@ export const FinanceView = () => {
     actionLock.lock(order.id);
     try {
       const result = await receiveDriverCash(order, { user, myProfile });
-      if (result.alreadyRecorded) {
-        showNotification('تم تسجيل هذا الإيراد مسبقاً في السجلات.');
-        return;
-      }
-      showNotification('تم استلام النقدية وتسجيلها في الإيرادات بنجاح.');
+      showNotification(result.alreadyRecorded
+        ? 'كان هذا الإيراد مسجَّلاً مسبقاً في السجلات — تم تحديث حالة الطلب وإزالته من القائمة بلا تكرار القيد المالي.'
+        : 'تم استلام النقدية وتسجيلها في الإيرادات بنجاح.');
+      actionLock.release(order.id);
     } catch {
       actionLock.release(order.id);
     } finally {
@@ -128,11 +133,10 @@ export const FinanceView = () => {
     actionLock.lock(order.id);
     try {
       const result = await receiveCreditPayment(order, { user, myProfile });
-      if (result.alreadyRecorded) {
-        showNotification('تم تسجيل السداد مسبقاً.');
-        return;
-      }
-      showNotification('تم سداد الدين وتسجيله في الإيرادات بنجاح.');
+      showNotification(result.alreadyRecorded
+        ? 'كان هذا السداد مسجَّلاً مسبقاً في السجلات — تم تحديث حالة الطلب وإزالته من القائمة بلا تكرار القيد المالي.'
+        : 'تم سداد الدين وتسجيله في الإيرادات بنجاح.');
+      actionLock.release(order.id);
     } catch {
       actionLock.release(order.id);
     } finally {
