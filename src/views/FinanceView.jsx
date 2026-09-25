@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Package, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useSubmitLock } from '../hooks/useSubmitLock';
 import { useActionLock } from '../hooks/useActionLock';
@@ -88,6 +88,16 @@ export const FinanceView = () => {
     }
   };
 
+  // اعتراض اختيار "مشتريات مخزون" ضمن نموذج الحركة اليدوية: يُغلَق هذا
+  // النموذج فوراً وتُفتَح فاتورة الشراء متعددة الأصناف بدلاً منه — التصنيف
+  // نفسه يبقى متاحاً في القائمة (وفي سجل/فلتر الحركات لاحقاً)، لكن لا طريق
+  // لتسجيله كمصروف يدوي بسيط بلا أي تحديث فعلي للمخزون.
+  const handleSelectInventoryPurchase = () => {
+    setModalOpen(false);
+    setForm(EMPTY_TRANSACTION_FORM);
+    purchaseInvoiceForm.openModal();
+  };
+
   const confirmDriverCash = async (order) => {
     if (actionLock.isLocked(order.id)) return;
     if (order.cashStatus === 'received_by_finance') {
@@ -144,7 +154,6 @@ export const FinanceView = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h2 className="text-2xl font-bold text-gray-800">المالية والحسابات الشاملة</h2>
         <div className="flex gap-2 w-full md:w-auto">
-          <button onClick={purchaseInvoiceForm.openModal} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm flex-1 md:flex-none justify-center" title="فاتورة شراء بعدة أصناف: تُحدّث المخزون ومتوسط التكلفة، وتُسجّل مصروفاً واحداً بالإجمالي تلقائياً"><Package size={20} /> تسجيل شراء مخزون</button>
           <button onClick={() => setModalOpen(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm flex-1 md:flex-none justify-center"><Plus size={20} /> تسجيل حركة مالية</button>
         </div>
       </div>
@@ -178,7 +187,11 @@ export const FinanceView = () => {
         />
       )}
 
-      <TransactionFormModal isOpen={isModalOpen} onClose={() => setModalOpen(false)} form={form} setForm={setForm} isProcessing={submitLock.isProcessing} onSubmit={handleSubmit} />
+      <TransactionFormModal
+        isOpen={isModalOpen} onClose={() => setModalOpen(false)} form={form} setForm={setForm}
+        isProcessing={submitLock.isProcessing} onSubmit={handleSubmit}
+        onSelectInventoryPurchase={handleSelectInventoryPurchase}
+      />
 
       <PurchaseInvoiceModal
         isOpen={purchaseInvoiceForm.isModalOpen} onClose={purchaseInvoiceForm.closeModal}
