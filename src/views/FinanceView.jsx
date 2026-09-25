@@ -4,19 +4,15 @@ import { useAppContext } from '../context/AppContext';
 import { useSubmitLock } from '../hooks/useSubmitLock';
 import { useActionLock } from '../hooks/useActionLock';
 import { addManualTransaction, deleteTransaction, receiveCreditPayment, receiveDriverCash } from '../services/financeService';
-import { purchaseInventory } from '../services/inventoryService';
 import { PLTab } from './finance/PLTab';
 import { DriversTab } from './finance/DriversTab';
 import { DebtsTab } from './finance/DebtsTab';
 import { TransactionLogsTab } from './finance/TransactionLogsTab';
 import { TransactionFormModal } from './finance/TransactionFormModal';
-import { InventoryFormModal } from './store/InventoryFormModal';
+import { PurchaseInvoiceModal } from './store/PurchaseInvoiceModal';
+import { usePurchaseInvoiceForm } from './store/usePurchaseInvoiceForm';
 
 const EMPTY_TRANSACTION_FORM = { type: 'expense', category: 'operational', amount: '', description: '' };
-// نفس شكل النموذج الفارغ المستخدم في StoreView.jsx تماماً — جسر واجهة فقط
-// إلى نفس مستند الإدخال المخزني وخدمة purchaseInventory، بلا أي تكرار أو
-// تعديل لمنطق الحساب نفسه.
-const EMPTY_PURCHASE_FORM = { itemName: '', type: 'مكونات', quantity: '', unit: 'كجم', price: '', supplier: '', invoiceNum: '' };
 
 const SUB_TABS = [
   { id: 'pl', label: 'تقرير الأرباح (P&L)' },
@@ -41,8 +37,6 @@ export const FinanceView = () => {
   } = useAppContext();
 
   const [isModalOpen, setModalOpen] = useState(false);
-  const [isPurchaseModalOpen, setPurchaseModalOpen] = useState(false);
-  const [purchaseForm, setPurchaseForm] = useState(EMPTY_PURCHASE_FORM);
   const [subTab, setSubTab] = useState('pl');
   const [filterCategory, setFilterCategory] = useState('all');
   const [startDate, setStartDate] = useState('');
@@ -53,6 +47,7 @@ export const FinanceView = () => {
   // قفل منفصل عن submitLock الخاص بنموذج الحركة اليدوية — نافذتان مستقلتان
   // لا ينبغي أن تتشارك حالة "جارٍ الحفظ" لأحدهما مع الأخرى.
   const purchaseSubmitLock = useSubmitLock();
+  const purchaseInvoiceForm = usePurchaseInvoiceForm({ inventory, showNotification, submitLock: purchaseSubmitLock });
   const actionLock = useActionLock();
   const isRowBusy = (id) => actionLock.isProcessing(id) || actionLock.isLocked(id);
 
@@ -135,25 +130,6 @@ export const FinanceView = () => {
     }
   };
 
-  // جسر واجهة فقط: نفس purchaseInventory المستخدمة في StoreView.jsx بلا أي
-  // تعديل — تُحدّث المخزون بمتوسط التكلفة المرجّح وتُسجّل مصروف "مشتريات
-  // مخزون" في السجل المالي تلقائياً ضمن نفس العملية، فتبقى شاشتا المخزون
-  // والمالية المستقلتان (StoreView وبقية FinanceView) بلا أي تغيير في سلوكهما.
-  const handlePurchaseSubmit = async (e) => {
-    e.preventDefault();
-    if (purchaseSubmitLock.isLocked()) return;
-    purchaseSubmitLock.lock();
-    try {
-      const { merged, loggedToFinance } = await purchaseInventory({ form: purchaseForm, inventory });
-      showNotification(merged ? `تم زيادة رصيد وتحديث متوسط التكلفة للمادة: ${purchaseForm.itemName}` : 'تم إضافة المادة الجديدة للمستودع.');
-      if (loggedToFinance) showNotification('تم تسجيل عملية الشراء في السجل المالي تلقائياً كمصروف.');
-      setPurchaseModalOpen(false);
-      setPurchaseForm(EMPTY_PURCHASE_FORM);
-    } finally {
-      purchaseSubmitLock.unlock();
-    }
-  };
-
   const handleDeleteTransaction = async (id) => {
     if (!window.confirm('هل أنت متأكد من حذف هذه المعاملة المالية نهائياً؟ (استخدم هذا لتنظيف التكرار القديم)')) return;
     await deleteTransaction(id);
@@ -168,7 +144,7 @@ export const FinanceView = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h2 className="text-2xl font-bold text-gray-800">المالية والحسابات الشاملة</h2>
         <div className="flex gap-2 w-full md:w-auto">
-          <button onClick={() => setPurchaseModalOpen(true)} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm flex-1 md:flex-none justify-center" title="يُحدّث المخزون ومتوسط التكلفة، ويسجّل المصروف تلقائياً في نفس الخطوة"><Package size={20} /> تسجيل شراء مخزون</button>
+          <button onClick={purchaseInvoiceForm.openModal} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm flex-1 md:flex-none justify-center" title="فاتورة شراء بعدة أصناف: تُحدّث المخزون ومتوسط التكلفة، وتُسجّل مصروفاً واحداً بالإجمالي تلقائياً"><Package size={20} /> تسجيل شراء مخزون</button>
           <button onClick={() => setModalOpen(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm flex-1 md:flex-none justify-center"><Plus size={20} /> تسجيل حركة مالية</button>
         </div>
       </div>
@@ -204,10 +180,13 @@ export const FinanceView = () => {
 
       <TransactionFormModal isOpen={isModalOpen} onClose={() => setModalOpen(false)} form={form} setForm={setForm} isProcessing={submitLock.isProcessing} onSubmit={handleSubmit} />
 
-      <InventoryFormModal
-        isOpen={isPurchaseModalOpen} onClose={() => setPurchaseModalOpen(false)}
-        editingInvId={null} form={purchaseForm} setForm={setPurchaseForm}
-        isProcessing={purchaseSubmitLock.isProcessing} onSubmit={handlePurchaseSubmit}
+      <PurchaseInvoiceModal
+        isOpen={purchaseInvoiceForm.isModalOpen} onClose={purchaseInvoiceForm.closeModal}
+        inventory={inventory} form={purchaseInvoiceForm.form} grandTotal={purchaseInvoiceForm.grandTotal}
+        isProcessing={purchaseInvoiceForm.isProcessing}
+        onFieldChange={purchaseInvoiceForm.handleFieldChange} onItemChange={purchaseInvoiceForm.handleItemChange}
+        onAddItem={purchaseInvoiceForm.addItem} onRemoveItem={purchaseInvoiceForm.removeItem}
+        onSubmit={purchaseInvoiceForm.handleSubmit}
       />
     </div>
   );
