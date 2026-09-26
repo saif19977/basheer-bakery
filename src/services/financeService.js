@@ -13,10 +13,16 @@ export async function deleteTransaction(id) {
 
 // يبني هوية مستند مالي فريدة مرتبطة بالطلب لمنع تسجيل نفس التحصيل مرتين
 // (تحقق ثنائي: هذا الاسم الفريد + فحص وجود المستند قبل الكتابة).
+//
+// وجود القيد المالي مسبقاً (alreadyRecorded) يمنع فقط تكرار الكتابة المالية
+// نفسها — لا يجوز أن يمنع تحديث حالة الطلب أيضاً. طلب قديم قد يحمل قيداً
+// مالياً بالفعل (من الزحف التاريخي مثلاً) بينما تبقى حالته "بعهدة السائق"/
+// "آجل غير مسدد" لأن حالته لم تُحدَّث معه — يجب تصحيح ذلك هنا وإلا يبقى
+// الطلب عالقاً إلى الأبد في قائمة الانتظار رغم أن قيده المالي مسجَّل فعلاً.
 const buildIdempotentRevenue = async ({ idPrefix, order, user, myProfile, description, amount, extraOrderFields = {} }) => {
   const transactionRef = dataDoc('transactions', `${idPrefix}_${order.id}`);
   const txSnap = await getDoc(transactionRef);
-  if (txSnap.exists()) return { alreadyRecorded: true };
+  const alreadyRecorded = txSnap.exists();
 
   await updateDoc(dataDoc('orders', order.id), {
     status: 'completed',
@@ -26,12 +32,14 @@ const buildIdempotentRevenue = async ({ idPrefix, order, user, myProfile, descri
     ...extraOrderFields,
   });
 
-  await setDoc(transactionRef, {
-    category: 'revenue', type: 'income', amount, description,
-    date: new Date().toISOString(), relatedOrderId: order.id,
-  });
+  if (!alreadyRecorded) {
+    await setDoc(transactionRef, {
+      category: 'revenue', type: 'income', amount, description,
+      date: new Date().toISOString(), relatedOrderId: order.id,
+    });
+  }
 
-  return { alreadyRecorded: false };
+  return { alreadyRecorded };
 };
 
 // تحصيل النقدية بعهدة مندوب التوصيل وتسجيلها كإيراد. المبلغ هو ما دُفع فعلاً
