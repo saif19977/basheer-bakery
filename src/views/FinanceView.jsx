@@ -7,6 +7,7 @@ import { addManualTransaction, deleteTransaction, receiveCreditPayment, receiveD
 import { PLTab } from './finance/PLTab';
 import { DriversTab } from './finance/DriversTab';
 import { DebtsTab } from './finance/DebtsTab';
+import { CreditLedgerTab } from './finance/CreditLedgerTab';
 import { TransactionLogsTab } from './finance/TransactionLogsTab';
 import { TransactionFormModal } from './finance/TransactionFormModal';
 import { PurchaseInvoiceModal } from './store/PurchaseInvoiceModal';
@@ -18,6 +19,7 @@ const SUB_TABS = [
   { id: 'pl', label: 'تقرير الأرباح (P&L)' },
   { id: 'drivers', label: 'نقدية السائقين' },
   { id: 'debts', label: 'الديون والذمم' },
+  { id: 'creditLedger', label: 'سجل الآجل والجزئي' },
   { id: 'logs', label: 'السجل اليومي' },
 ];
 
@@ -182,6 +184,8 @@ export const FinanceView = () => {
       {subTab === 'drivers' && <DriversTab driverCashOrders={driverCashOrders} isRowBusy={isRowBusy} onReceive={confirmDriverCash} />}
 
       {subTab === 'debts' && <DebtsTab creditOrders={creditOrders} isRowBusy={isRowBusy} onSettle={confirmCreditPayment} />}
+
+      {subTab === 'creditLedger' && <CreditLedgerTab creditOrders={creditOrders} />}
 
       {subTab === 'logs' && (
         <TransactionLogsTab
