@@ -112,21 +112,31 @@ export function useOrderForm({ dynamicCategories, finishedGoods, user, myProfile
     setIsUploadingImg(true);
     showNotification('⏳ جاري رفع الصور...');
 
-    const uploadedImages = [];
-    for (let i = 0; i < filesArray.length; i++) {
-      const url = await uploadToStorage(filesArray[i]);
-      if (url) uploadedImages.push(url);
+    // try/finally هنا حماية إضافية: uploadToStorage الحالية مصمَّمة لعدم رفض
+    // وعدها أبداً (ترجع صورة مصغّرة محلياً كخطة بديلة بدل الفشل)، لكن أي خطأ
+    // غير متوقع هنا (مثلاً في setForm نفسها) لا يجوز أن يُبقي isUploadingImg
+    // عالقاً على true إلى الأبد ويعطّل زر تأكيد الطلب بصمت بلا أي تفسير.
+    try {
+      const uploadedImages = [];
+      for (let i = 0; i < filesArray.length; i++) {
+        const url = await uploadToStorage(filesArray[i]);
+        if (url) uploadedImages.push(url);
+      }
+
+      setForm(prev => {
+        const newItems = [...prev.items];
+        const currentImages = newItems[index].itemImages || [];
+        newItems[index] = { ...newItems[index], itemImages: [...currentImages, ...uploadedImages] };
+        return { ...prev, items: newItems };
+      });
+
+      if (uploadedImages.length > 0) showNotification('✅ تم رفع الصور بنجاح!');
+    } catch (err) {
+      console.error('فشل رفع الصور:', err);
+      showNotification('❌ تعذّر رفع الصور، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setIsUploadingImg(false);
     }
-
-    setForm(prev => {
-      const newItems = [...prev.items];
-      const currentImages = newItems[index].itemImages || [];
-      newItems[index] = { ...newItems[index], itemImages: [...currentImages, ...uploadedImages] };
-      return { ...prev, items: newItems };
-    });
-
-    setIsUploadingImg(false);
-    if (uploadedImages.length > 0) showNotification('✅ تم رفع الصور بنجاح!');
   };
 
   const removeItemImage = (itemIndex, imgIndex) => {
@@ -139,10 +149,17 @@ export function useOrderForm({ dynamicCategories, finishedGoods, user, myProfile
     });
   };
 
+  // كان هذا المعالج يفتقر لأي catch: أي خطأ من saveOrder/getNextOrderNumber
+  // (رفض صلاحيات، انقطاع شبكة...) كان يُصفَّى بصمت — الزر يُعاد تفعيله بعد
+  // 1.5 ثانية بفضل finally، لكن النافذة تبقى مفتوحة والمستخدم لا يرى أي
+  // تفسير لما حدث، فيبدو الأمر وكأن الإرسال "عالق" رغم أن القفل تحرَّر فعلياً.
+  // الآن: أي خطأ يُعرض صراحةً عبر إشعار، والقفل يتحرَّر فوراً عند الفشل
+  // (بدل انتظار 1.5 ثانية) حتى يمكن إعادة المحاولة مباشرة.
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitLock.isLocked() || isUploadingImg) return;
     submitLock.lock();
+    let succeeded = false;
     try {
       const orderPayload = {
         ...form, price: Number(form.totalPrice || 0), notes: form.globalNotes,
@@ -153,7 +170,6 @@ export function useOrderForm({ dynamicCategories, finishedGoods, user, myProfile
         const stockResult = await deductReadyMadeStock(orderPayload.items, finishedGoods);
         if (!stockResult.ok) {
           showNotification(`❌ الكمية المطلوبة من الصنف "${stockResult.itemName}" غير متوفرة في المخزن التام!`);
-          submitLock.unlock();
           return;
         }
       }
@@ -164,8 +180,13 @@ export function useOrderForm({ dynamicCategories, finishedGoods, user, myProfile
       setModalOpen(false);
       setEditingId(null);
       setForm(emptyForm(dynamicCategories));
+      succeeded = true;
+    } catch (err) {
+      console.error('فشل حفظ الطلب:', err);
+      showNotification(`❌ تعذّر حفظ الطلب، يرجى المحاولة مرة أخرى.${err?.message ? ` (${err.message})` : ''}`);
     } finally {
-      submitLock.unlockAfter(1500);
+      if (succeeded) submitLock.unlockAfter(1500);
+      else submitLock.unlock();
     }
   };
 
