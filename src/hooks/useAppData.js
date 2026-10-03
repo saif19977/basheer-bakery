@@ -9,7 +9,7 @@ const SKIP_LOADING_TIMEOUT_MS = 3000;
 // شاشة تحتاج بيانات لا يجوز أن تختفي بعد هذا الحد (العملاء، الديون، نقدية
 // السائقين) تُغذَّى من اشتراك مستقل غير محدود بدل هذه المصفوفة — انظر
 // أدناه customers/unpaidCreditOrders/pendingDriverCashOrders.
-const RECENT_ORDERS_LIMIT = 200;
+const RECENT_ORDERS_LIMIT = 100;
 
 const sortByDateDesc = (list, dateField) => [...list].sort((a, b) => {
   try {
