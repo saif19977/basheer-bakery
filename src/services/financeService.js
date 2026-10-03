@@ -55,43 +55,14 @@ export async function receiveDriverCash(order, { user, myProfile }) {
   });
 }
 
-// تسديد الدين المتبقي على طلب (كامل الآجل أو الجزء المتبقي من دفعة جزئية)
-// وتسجيله كإيراد، ثم تصفير remainingDebt حتى يختفي من شاشة الديون. يزيد
-// "إجمالي مدفوعات" العميل فقط إن لم يكن الطلب قد اكتمل مسبقاً (لتفادي
-// احتسابه مرتين مع لحظة تسليم الطلب العادية). يُضاف أيضاً إلى سجل payments
-// الخاص بالطلب (arrayUnion إضافي بلا أي تعديل على منطق buildIdempotentRevenue
-// نفسه) حتى يبقى هذا السجل كاملاً سواء سُدِّد الدين دفعة واحدة من هنا أو عبر
-// receivePartialCreditPayment أدناه.
-export async function receiveCreditPayment(order, { user, myProfile }) {
-  const settledAmount = Number(order.remainingDebt ?? order.price ?? 0);
-  const now = new Date().toISOString();
-  const result = await buildIdempotentRevenue({
-    idPrefix: 'CREDIT', order, user, myProfile,
-    description: `سداد دين طلب آجل: ${order.customerName} #${formatOrderNum(order)}`,
-    amount: settledAmount,
-    extraOrderFields: {
-      remainingDebt: 0,
-      payments: arrayUnion({
-        amount: settledAmount, method: 'تسديد كامل', date: now,
-        recordedByUid: user.uid, recordedByName: myProfile?.name || 'غير معروف',
-      }),
-    },
-  });
-
-  if (!result.alreadyRecorded && order.status !== 'completed' && order.phone) {
-    await addCustomerRevenue(order.phone, order.price);
-  }
-
-  return result;
-}
-
-// تسديد جزء من دين طلب آجل/جزئي — بعكس receiveCreditPayment (تسوية كاملة
-// لمرة واحدة بمعرّف مستند ثابت CREDIT_{orderId})، هذا الإجراء يتكرر عادةً عدة
-// مرات لنفس الطلب حتى اكتمال السداد، فكل دفعة جزئية تُسجَّل كقيد مالي مستقل
-// بمعرّف جديد في كل مرة بدل معرّف ثابت. يُنفَّذ ضمن Firestore transaction
-// (قراءة remainingDebt الفعلي من الخادم ثم الكتابة) بدل الاعتماد على القيمة
-// المحلية المحتمل تقادمها، حتى لا يصبح الدين سالباً عند تسديدتين متزامنتين
-// على نفس الطلب من جهازين مختلفين.
+// تسديد دين طلب آجل/جزئي — جزئياً أو تسديد كامل المتبقي دفعة واحدة، كلاهما
+// عبر نفس المسار (مودال إدارة الدين يمرر amount = المتبقي بالكامل لزر
+// "تسديد المتبقي بالكامل"). بما أن الطلب الواحد قد يتلقى عدة دفعات عبر
+// الزمن، كل دفعة تُسجَّل كقيد مالي مستقل بمعرّف جديد في كل مرة (بعكس التحصيل
+// لمرة واحدة في buildIdempotentRevenue أعلاه بمعرّف ثابت). يُنفَّذ ضمن
+// Firestore transaction (قراءة remainingDebt الفعلي من الخادم ثم الكتابة)
+// بدل الاعتماد على القيمة المحلية المحتمل تقادمها، حتى لا يصبح الدين سالباً
+// عند تسديدتين متزامنتين على نفس الطلب من جهازين مختلفين.
 export async function receivePartialCreditPayment(order, { amount, method, date, user, myProfile }) {
   const requestedAmount = Number(amount) || 0;
   if (requestedAmount <= 0) {
