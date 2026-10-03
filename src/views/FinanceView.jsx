@@ -3,17 +3,21 @@ import { Plus } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useSubmitLock } from '../hooks/useSubmitLock';
 import { useActionLock } from '../hooks/useActionLock';
-import { addManualTransaction, deleteTransaction, receiveCreditPayment, receiveDriverCash } from '../services/financeService';
+import { addManualTransaction, deleteTransaction, receiveCreditPayment, receiveDriverCash, receivePartialCreditPayment } from '../services/financeService';
 import { PLTab } from './finance/PLTab';
 import { DriversTab } from './finance/DriversTab';
 import { DebtsTab } from './finance/DebtsTab';
 import { CreditLedgerTab } from './finance/CreditLedgerTab';
 import { TransactionLogsTab } from './finance/TransactionLogsTab';
 import { TransactionFormModal } from './finance/TransactionFormModal';
+import { PartialPaymentModal } from './finance/PartialPaymentModal';
 import { PurchaseInvoiceModal } from './store/PurchaseInvoiceModal';
 import { usePurchaseInvoiceForm } from './store/usePurchaseInvoiceForm';
+import { formatMoney } from '../utils/format';
 
 const EMPTY_TRANSACTION_FORM = { type: 'expense', category: 'operational', amount: '', description: '' };
+const todayDateString = () => new Date().toISOString().slice(0, 10);
+const emptyPartialPaymentForm = () => ({ amount: '', method: 'نقد', date: todayDateString() });
 
 const SUB_TABS = [
   { id: 'pl', label: 'تقرير الأرباح (P&L)' },
@@ -50,6 +54,9 @@ export const FinanceView = () => {
   // لا ينبغي أن تتشارك حالة "جارٍ الحفظ" لأحدهما مع الأخرى.
   const purchaseSubmitLock = useSubmitLock();
   const purchaseInvoiceForm = usePurchaseInvoiceForm({ inventory, showNotification, submitLock: purchaseSubmitLock });
+  const partialPaymentSubmitLock = useSubmitLock();
+  const [partialPaymentOrder, setPartialPaymentOrder] = useState(null);
+  const [partialPaymentForm, setPartialPaymentForm] = useState(emptyPartialPaymentForm);
   const actionLock = useActionLock();
   const isRowBusy = (id) => actionLock.isProcessing(id) || actionLock.isLocked(id);
 
@@ -64,7 +71,7 @@ export const FinanceView = () => {
   const filteredExpense = calcTotal(t => t.type === 'expense');
 
   // ملاحظة: تقرير الأرباح (P&L) لا يزال يعتمد على مصفوفة الطلبات الأخيرة
-  // المحدودة (200) لحساب تكلفة البضاعة المباعة ضمن الفترة المختارة — هذا
+  // المحدودة (100) لحساب تكلفة البضاعة المباعة ضمن الفترة المختارة — هذا
   // يكفي للفترات الحديثة، لكن فترة قديمة جداً قد تُغفل طلبات خارج هذا الحد.
   // معالجة هذا بشكل كامل تتطلب تقارير تجميعية يومية منفصلة (خارج نطاق هذا الإصلاح).
   const plOrders = orders.filter(o => o && o.status === 'completed' && withinDateRange(o.completedAt, startDate, endDate));
@@ -146,6 +153,40 @@ export const FinanceView = () => {
     }
   };
 
+  // فتح/إغلاق نافذة الدفعة الجزئية — وجود partialPaymentOrder هو ما يحدد
+  // فتحها (نفس نمط CustomerNotesModal)، بدل isOpen منفصل قد يفلت من التزامن
+  // مع الطلب نفسه.
+  const openPartialPaymentModal = (order) => {
+    setPartialPaymentForm(emptyPartialPaymentForm());
+    setPartialPaymentOrder(order);
+  };
+
+  const closePartialPaymentModal = () => setPartialPaymentOrder(null);
+
+  const handlePartialPaymentSubmit = async (e) => {
+    e.preventDefault();
+    if (partialPaymentSubmitLock.isLocked() || !partialPaymentOrder) return;
+    partialPaymentSubmitLock.lock();
+    try {
+      const paymentDateIso = partialPaymentForm.date
+        ? new Date(`${partialPaymentForm.date}T00:00:00`).toISOString()
+        : new Date().toISOString();
+      const result = await receivePartialCreditPayment(partialPaymentOrder, {
+        amount: partialPaymentForm.amount, method: partialPaymentForm.method, date: paymentDateIso,
+        user, myProfile,
+      });
+      showNotification(result.isFullSettlement
+        ? 'تم تسديد كامل الدين المتبقي بنجاح وتسجيله في الإيرادات.'
+        : `تم تسجيل دفعة بقيمة ${formatMoney(result.paymentAmount)} IQD. المتبقي الآن: ${formatMoney(result.remainingAfter)} IQD.`);
+      setPartialPaymentOrder(null);
+    } catch (err) {
+      console.error('فشل تسجيل الدفعة الجزئية:', err);
+      showNotification(`❌ تعذّر تسجيل الدفعة.${err?.message ? ` (${err.message})` : ''}`);
+    } finally {
+      partialPaymentSubmitLock.unlock();
+    }
+  };
+
   const handleDeleteTransaction = async (id) => {
     if (!window.confirm('هل أنت متأكد من حذف هذه المعاملة المالية نهائياً؟ (استخدم هذا لتنظيف التكرار القديم)')) return;
     await deleteTransaction(id);
@@ -183,7 +224,7 @@ export const FinanceView = () => {
 
       {subTab === 'drivers' && <DriversTab driverCashOrders={driverCashOrders} isRowBusy={isRowBusy} onReceive={confirmDriverCash} />}
 
-      {subTab === 'debts' && <DebtsTab creditOrders={creditOrders} isRowBusy={isRowBusy} onSettle={confirmCreditPayment} />}
+      {subTab === 'debts' && <DebtsTab creditOrders={creditOrders} isRowBusy={isRowBusy} onSettle={confirmCreditPayment} onPartialSettle={openPartialPaymentModal} />}
 
       {subTab === 'creditLedger' && <CreditLedgerTab creditOrders={creditOrders} />}
 
@@ -208,6 +249,12 @@ export const FinanceView = () => {
         onFieldChange={purchaseInvoiceForm.handleFieldChange} onItemChange={purchaseInvoiceForm.handleItemChange}
         onAddItem={purchaseInvoiceForm.addItem} onRemoveItem={purchaseInvoiceForm.removeItem}
         onSubmit={purchaseInvoiceForm.handleSubmit}
+      />
+
+      <PartialPaymentModal
+        isOpen={!!partialPaymentOrder} onClose={closePartialPaymentModal} order={partialPaymentOrder}
+        form={partialPaymentForm} setForm={setPartialPaymentForm}
+        isProcessing={partialPaymentSubmitLock.isProcessing} onSubmit={handlePartialPaymentSubmit}
       />
     </div>
   );
