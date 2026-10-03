@@ -3,21 +3,21 @@ import { Plus } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useSubmitLock } from '../hooks/useSubmitLock';
 import { useActionLock } from '../hooks/useActionLock';
-import { addManualTransaction, deleteTransaction, receiveCreditPayment, receiveDriverCash, receivePartialCreditPayment } from '../services/financeService';
+import { addManualTransaction, deleteTransaction, receiveDriverCash, receivePartialCreditPayment } from '../services/financeService';
 import { PLTab } from './finance/PLTab';
 import { DriversTab } from './finance/DriversTab';
 import { DebtsTab } from './finance/DebtsTab';
 import { CreditLedgerTab } from './finance/CreditLedgerTab';
 import { TransactionLogsTab } from './finance/TransactionLogsTab';
 import { TransactionFormModal } from './finance/TransactionFormModal';
-import { PartialPaymentModal } from './finance/PartialPaymentModal';
+import { DebtManagementModal } from './finance/DebtManagementModal';
 import { PurchaseInvoiceModal } from './store/PurchaseInvoiceModal';
 import { usePurchaseInvoiceForm } from './store/usePurchaseInvoiceForm';
 import { formatMoney } from '../utils/format';
 
 const EMPTY_TRANSACTION_FORM = { type: 'expense', category: 'operational', amount: '', description: '' };
 const todayDateString = () => new Date().toISOString().slice(0, 10);
-const emptyPartialPaymentForm = () => ({ amount: '', method: 'نقد', date: todayDateString() });
+const emptyDebtPaymentForm = () => ({ amount: '', method: 'نقد', date: todayDateString() });
 
 const SUB_TABS = [
   { id: 'pl', label: 'تقرير الأرباح (P&L)' },
@@ -54,9 +54,10 @@ export const FinanceView = () => {
   // لا ينبغي أن تتشارك حالة "جارٍ الحفظ" لأحدهما مع الأخرى.
   const purchaseSubmitLock = useSubmitLock();
   const purchaseInvoiceForm = usePurchaseInvoiceForm({ inventory, showNotification, submitLock: purchaseSubmitLock });
-  const partialPaymentSubmitLock = useSubmitLock();
-  const [partialPaymentOrder, setPartialPaymentOrder] = useState(null);
-  const [partialPaymentForm, setPartialPaymentForm] = useState(emptyPartialPaymentForm);
+  const debtPaymentSubmitLock = useSubmitLock();
+  const [debtManagementOrderId, setDebtManagementOrderId] = useState(null);
+  const [debtPaymentForm, setDebtPaymentForm] = useState(emptyDebtPaymentForm);
+  const [debtPaymentAction, setDebtPaymentAction] = useState(null);
   const actionLock = useActionLock();
   const isRowBusy = (id) => actionLock.isProcessing(id) || actionLock.isLocked(id);
 
@@ -83,6 +84,10 @@ export const FinanceView = () => {
   // الطلبات المحدودة — لا يختفي منهما دين أو مبلغ معلّق مهما قدُم تاريخه.
   const driverCashOrders = pendingDriverCashOrders;
   const creditOrders = unpaidCreditOrders;
+  // مشتقّة من creditOrders اللحظي (لا نسخة محلية ثابتة) حتى تعكس نافذة إدارة
+  // الدين أي دفعة جديدة أو تحديث للمتبقي فور حدوثه دون إغلاقها وإعادة فتحها.
+  // عند التسديد الكامل يختفي الطلب من creditOrders فتُغلَق النافذة تلقائياً.
+  const debtManagementOrder = creditOrders.find(o => o.id === debtManagementOrderId) || null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -133,58 +138,54 @@ export const FinanceView = () => {
     }
   };
 
-  const confirmCreditPayment = async (order) => {
-    if (actionLock.isLocked(order.id)) return;
-    if (order.cashStatus === 'received_by_finance') {
-      showNotification('تم سداد دين هذا الطلب مسبقاً.');
-      return;
-    }
-    actionLock.lock(order.id);
-    try {
-      const result = await receiveCreditPayment(order, { user, myProfile });
-      showNotification(result.alreadyRecorded
-        ? 'كان هذا السداد مسجَّلاً مسبقاً في السجلات — تم تحديث حالة الطلب وإزالته من القائمة بلا تكرار القيد المالي.'
-        : 'تم سداد الدين وتسجيله في الإيرادات بنجاح.');
-      actionLock.release(order.id);
-    } catch {
-      actionLock.release(order.id);
-    } finally {
-      actionLock.finish();
-    }
+  // فتح/إغلاق نافذة إدارة الدين — وجود معرّف الطلب هو ما يحدد فتحها (نفس نمط
+  // CustomerNotesModal)، والطلب نفسه مشتقّ لحظياً من creditOrders أعلاه.
+  const openDebtManagementModal = (order) => {
+    setDebtPaymentForm(emptyDebtPaymentForm());
+    setDebtManagementOrderId(order.id);
   };
 
-  // فتح/إغلاق نافذة الدفعة الجزئية — وجود partialPaymentOrder هو ما يحدد
-  // فتحها (نفس نمط CustomerNotesModal)، بدل isOpen منفصل قد يفلت من التزامن
-  // مع الطلب نفسه.
-  const openPartialPaymentModal = (order) => {
-    setPartialPaymentForm(emptyPartialPaymentForm());
-    setPartialPaymentOrder(order);
-  };
+  const closeDebtManagementModal = () => setDebtManagementOrderId(null);
 
-  const closePartialPaymentModal = () => setPartialPaymentOrder(null);
-
-  const handlePartialPaymentSubmit = async (e) => {
-    e.preventDefault();
-    if (partialPaymentSubmitLock.isLocked() || !partialPaymentOrder) return;
-    partialPaymentSubmitLock.lock();
+  // مسار تسديد موحَّد (جزئي أو كامل المتبقي) يُستدعى بمبلغين مختلفين فقط —
+  // الخدمة نفسها (receivePartialCreditPayment) تتكفّل بتمييز التسوية الكاملة
+  // عبر transaction آمنة من التزامن.
+  const submitDebtPayment = async (amount, actionLabel) => {
+    if (debtPaymentSubmitLock.isLocked() || !debtManagementOrder) return;
+    debtPaymentSubmitLock.lock();
+    setDebtPaymentAction(actionLabel);
     try {
-      const paymentDateIso = partialPaymentForm.date
-        ? new Date(`${partialPaymentForm.date}T00:00:00`).toISOString()
+      const paymentDateIso = debtPaymentForm.date
+        ? new Date(`${debtPaymentForm.date}T00:00:00`).toISOString()
         : new Date().toISOString();
-      const result = await receivePartialCreditPayment(partialPaymentOrder, {
-        amount: partialPaymentForm.amount, method: partialPaymentForm.method, date: paymentDateIso,
-        user, myProfile,
+      const result = await receivePartialCreditPayment(debtManagementOrder, {
+        amount, method: debtPaymentForm.method, date: paymentDateIso, user, myProfile,
       });
       showNotification(result.isFullSettlement
         ? 'تم تسديد كامل الدين المتبقي بنجاح وتسجيله في الإيرادات.'
         : `تم تسجيل دفعة بقيمة ${formatMoney(result.paymentAmount)} IQD. المتبقي الآن: ${formatMoney(result.remainingAfter)} IQD.`);
-      setPartialPaymentOrder(null);
+      if (result.isFullSettlement) {
+        closeDebtManagementModal();
+      } else {
+        setDebtPaymentForm(emptyDebtPaymentForm());
+      }
     } catch (err) {
-      console.error('فشل تسجيل الدفعة الجزئية:', err);
+      console.error('فشل تسجيل الدفعة:', err);
       showNotification(`❌ تعذّر تسجيل الدفعة.${err?.message ? ` (${err.message})` : ''}`);
     } finally {
-      partialPaymentSubmitLock.unlock();
+      debtPaymentSubmitLock.unlock();
+      setDebtPaymentAction(null);
     }
+  };
+
+  const handlePartialPaymentSubmit = (e) => {
+    e.preventDefault();
+    submitDebtPayment(debtPaymentForm.amount, 'partial');
+  };
+
+  const handleFullPaymentSubmit = () => {
+    if (!debtManagementOrder) return;
+    submitDebtPayment(debtManagementOrder.remainingDebt, 'full');
   };
 
   const handleDeleteTransaction = async (id) => {
@@ -224,7 +225,7 @@ export const FinanceView = () => {
 
       {subTab === 'drivers' && <DriversTab driverCashOrders={driverCashOrders} isRowBusy={isRowBusy} onReceive={confirmDriverCash} />}
 
-      {subTab === 'debts' && <DebtsTab creditOrders={creditOrders} isRowBusy={isRowBusy} onSettle={confirmCreditPayment} onPartialSettle={openPartialPaymentModal} />}
+      {subTab === 'debts' && <DebtsTab creditOrders={creditOrders} onManageDebt={openDebtManagementModal} />}
 
       {subTab === 'creditLedger' && <CreditLedgerTab creditOrders={creditOrders} />}
 
@@ -251,10 +252,11 @@ export const FinanceView = () => {
         onSubmit={purchaseInvoiceForm.handleSubmit}
       />
 
-      <PartialPaymentModal
-        isOpen={!!partialPaymentOrder} onClose={closePartialPaymentModal} order={partialPaymentOrder}
-        form={partialPaymentForm} setForm={setPartialPaymentForm}
-        isProcessing={partialPaymentSubmitLock.isProcessing} onSubmit={handlePartialPaymentSubmit}
+      <DebtManagementModal
+        isOpen={!!debtManagementOrder} onClose={closeDebtManagementModal} order={debtManagementOrder}
+        form={debtPaymentForm} setForm={setDebtPaymentForm}
+        isProcessing={debtPaymentSubmitLock.isProcessing} processingAction={debtPaymentAction}
+        onSubmitPartial={handlePartialPaymentSubmit} onSubmitFull={handleFullPaymentSubmit}
       />
     </div>
   );
