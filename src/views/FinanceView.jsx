@@ -16,7 +16,10 @@ import { usePurchaseInvoiceForm } from './store/usePurchaseInvoiceForm';
 import { formatMoney } from '../utils/format';
 
 const EMPTY_TRANSACTION_FORM = { type: 'expense', category: 'operational', amount: '', description: '' };
-const todayDateString = () => new Date().toISOString().slice(0, 10);
+// تاريخ اليوم بتوقيت بغداد (لا UTC) — بين الساعة 21:00 و23:59 بتوقيت UTC يكون
+// التاريخ المحلي في بغداد (UTC+3) قد تجاوز منتصف الليل فعلاً، فلو استُخدم
+// new Date().toISOString() هنا لظهر "اليوم" على أنه تاريخ الأمس.
+const todayDateString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' });
 const emptyDebtPaymentForm = () => ({ amount: '', method: 'نقد', date: todayDateString() });
 
 const SUB_TABS = [
@@ -27,12 +30,22 @@ const SUB_TABS = [
   { id: 'logs', label: 'السجل اليومي' },
 ];
 
+// يقارن اليوم التقويمي بتوقيت بغداد حصراً لكل من القيمة والحدَّين، بدل تحويل
+// كل طرف لطابع زمني UTC بمنطق مختلف (الحد الأول كان يُفسَّر UTC منتصف الليل،
+// والحد الثاني محلياً) — هذا التضارب كان يستثني دفعة "اليوم" المدخلة محلياً
+// من فلتر "اليوم" نفسه لأي مستخدم شرقي UTC (بغداد UTC+3)، لأن طابعها الزمني
+// الفعلي (محوَّل من منتصف ليل محلي) يقع قبل منتصف ليل UTC لنفس التاريخ.
+const toBaghdadDateStr = (dateValue) => {
+  const d = new Date(dateValue);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' });
+};
+
 const withinDateRange = (dateValue, startDate, endDate) => {
-  try {
-    const time = new Date(dateValue || 0).getTime();
-    if (startDate && time < new Date(startDate).getTime()) return false;
-    if (endDate && time > new Date(endDate + 'T23:59:59').getTime()) return false;
-  } catch { /* تاريخ غير صالح: لا يُستبعد السجل بسببه */ }
+  const dayStr = toBaghdadDateStr(dateValue);
+  if (!dayStr) return true; // تاريخ غير صالح: لا يُستبعد السجل بسببه
+  if (startDate && dayStr < startDate) return false;
+  if (endDate && dayStr > endDate) return false;
   return true;
 };
 
