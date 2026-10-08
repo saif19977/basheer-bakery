@@ -45,8 +45,14 @@ export const FinanceView = () => {
   const [isModalOpen, setModalOpen] = useState(false);
   const [subTab, setSubTab] = useState('pl');
   const [filterCategory, setFilterCategory] = useState('all');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // فترتان مستقلتان تماماً — قبل هذا الفصل كانت شاشتا P&L والسجل اليومي
+  // تتشاركان نفس startDate/endDate، فأي فترة تقرير محددة في P&L (شهر ماضٍ
+  // مثلاً) تبقى فاعلة بصمت عند التنقل إلى السجل اليومي، فتُخفي معاملات
+  // اليوم (كدفعة دين جديدة) دون أي إشارة أن فلتراً نشطاً يمنع ظهورها.
+  const [plStartDate, setPlStartDate] = useState('');
+  const [plEndDate, setPlEndDate] = useState('');
+  const [logsStartDate, setLogsStartDate] = useState('');
+  const [logsEndDate, setLogsEndDate] = useState('');
   const [form, setForm] = useState(EMPTY_TRANSACTION_FORM);
 
   const submitLock = useSubmitLock();
@@ -61,21 +67,21 @@ export const FinanceView = () => {
   const actionLock = useActionLock();
   const isRowBusy = (id) => actionLock.isProcessing(id) || actionLock.isLocked(id);
 
-  const fullyFilteredTransactions = transactions.filter(t => {
-    if (!t) return false;
-    if (filterCategory !== 'all' && t.category !== filterCategory) return false;
-    return withinDateRange(t.date, startDate, endDate);
-  });
+  // فلتر الفئة يبقى مشتركاً عمداً (يخص "أي معاملات تُحتسب" بصرف النظر عن
+  // الفترة)، لكن كل تبويب يطبّق فترته الخاصة من هذه القاعدة المصفّاة بالفئة.
+  const categoryFilteredTransactions = transactions.filter(t => t && (filterCategory === 'all' || t.category === filterCategory));
+  const plFilteredTransactions = categoryFilteredTransactions.filter(t => withinDateRange(t.date, plStartDate, plEndDate));
+  const logsFilteredTransactions = categoryFilteredTransactions.filter(t => withinDateRange(t.date, logsStartDate, logsEndDate));
 
-  const calcTotal = (condition) => fullyFilteredTransactions.filter(condition).reduce((sum, t) => sum + Number(t.amount || 0), 0);
-  const filteredIncome = calcTotal(t => t.type === 'income');
-  const filteredExpense = calcTotal(t => t.type === 'expense');
+  const calcTotal = (list, condition) => list.filter(condition).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const filteredIncome = calcTotal(plFilteredTransactions, t => t.type === 'income');
+  const filteredExpense = calcTotal(plFilteredTransactions, t => t.type === 'expense');
 
   // ملاحظة: تقرير الأرباح (P&L) لا يزال يعتمد على مصفوفة الطلبات الأخيرة
   // المحدودة (100) لحساب تكلفة البضاعة المباعة ضمن الفترة المختارة — هذا
   // يكفي للفترات الحديثة، لكن فترة قديمة جداً قد تُغفل طلبات خارج هذا الحد.
   // معالجة هذا بشكل كامل تتطلب تقارير تجميعية يومية منفصلة (خارج نطاق هذا الإصلاح).
-  const plOrders = orders.filter(o => o && o.status === 'completed' && withinDateRange(o.completedAt, startDate, endDate));
+  const plOrders = orders.filter(o => o && o.status === 'completed' && withinDateRange(o.completedAt, plStartDate, plEndDate));
   const plCogs = plOrders.reduce((sum, o) => sum + Number(o?.cogs || 0), 0);
   const netRevenue = filteredIncome - filteredExpense;
   const finalNetProfit = netRevenue - plCogs;
@@ -217,9 +223,9 @@ export const FinanceView = () => {
 
       {subTab === 'pl' && (
         <PLTab
-          startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate}
+          startDate={plStartDate} setStartDate={setPlStartDate} endDate={plEndDate} setEndDate={setPlEndDate}
           income={filteredIncome} expense={filteredExpense} netRevenue={netRevenue} cogs={plCogs} netProfit={finalNetProfit}
-          onPrint={() => setPrintData({ printType: 'finance_report', data: fullyFilteredTransactions, startDate, endDate, totals: { plIncome: filteredIncome, plCogs, filteredExpense, netRevenue, finalNetProfit } })}
+          onPrint={() => setPrintData({ printType: 'finance_report', data: plFilteredTransactions, startDate: plStartDate, endDate: plEndDate, totals: { plIncome: filteredIncome, plCogs, filteredExpense, netRevenue, finalNetProfit } })}
         />
       )}
 
@@ -232,8 +238,8 @@ export const FinanceView = () => {
       {subTab === 'logs' && (
         <TransactionLogsTab
           filterCategory={filterCategory} setFilterCategory={setFilterCategory}
-          startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate}
-          transactions={fullyFilteredTransactions} canDelete={myProfile?.role === 'admin'} onDelete={handleDeleteTransaction}
+          startDate={logsStartDate} setStartDate={setLogsStartDate} endDate={logsEndDate} setEndDate={setLogsEndDate}
+          transactions={logsFilteredTransactions} canDelete={myProfile?.role === 'admin'} onDelete={handleDeleteTransaction}
         />
       )}
 

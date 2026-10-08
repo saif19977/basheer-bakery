@@ -1,4 +1,4 @@
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { Table } from '../../components/ui/Table';
 import { formatDate, formatMoney } from '../../utils/format';
 import { ALL_FINANCE_CATEGORIES } from '../../constants/financeCategories';
@@ -6,9 +6,13 @@ import { ALL_FINANCE_CATEGORIES } from '../../constants/financeCategories';
 export const TransactionLogsTab = ({
   filterCategory, setFilterCategory, startDate, setStartDate, endDate, setEndDate,
   transactions, canDelete, onDelete,
-}) => (
+}) => {
+  const hasActiveFilter = filterCategory !== 'all' || !!startDate || !!endDate;
+  const clearFilter = () => { setFilterCategory('all'); setStartDate(''); setEndDate(''); };
+
+  return (
   <div className="space-y-4">
-    <div className="flex flex-col sm:flex-row gap-3 bg-gray-100 p-3 rounded-lg border">
+    <div className="flex flex-col sm:flex-row gap-3 bg-gray-100 p-3 rounded-lg border items-start sm:items-center">
       <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="p-2 border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-amber-500 bg-white text-sm flex-1">
         <option value="all">كل الفئات</option>
         {Object.entries(ALL_FINANCE_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -18,6 +22,11 @@ export const TransactionLogsTab = ({
         <span className="text-gray-400">-</span>
         <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-lg outline-none text-sm" />
       </div>
+      {hasActiveFilter && (
+        <button type="button" onClick={clearFilter} className="text-xs font-bold text-blue-700 hover:underline flex items-center gap-1 whitespace-nowrap">
+          <X size={14} /> فلتر نشط — مسح وعرض الكل
+        </button>
+      )}
     </div>
     <Table headers={['التاريخ', 'النوع', 'الفئة', 'الوصف', 'المبلغ', 'إجراء']}>
       {transactions.map(t => (
@@ -39,4 +48,5 @@ export const TransactionLogsTab = ({
       {transactions.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-gray-400">لا توجد معاملات.</td></tr>}
     </Table>
   </div>
-);
+  );
+};
